@@ -43,7 +43,7 @@ if (!userId) {
   localStorage.setItem('userId', userId);
 }
 
-let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{}};
+let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{},dataReprogramacao:null};
 let syncEnabled = true;
 let isLoading = true;
 
@@ -121,6 +121,7 @@ async function loadFromCloud() {
       const data = docSnap.data();
       e = {...e, ...data};
       if (!e.titulos) e.titulos = {};
+      if (!e.dataReprogramacao) e.dataReprogramacao = null;
       if (!e.cron.length) gen();
       showSyncStatus('Carregado da nuvem!', 'success');
     } else {
@@ -168,7 +169,8 @@ function ld(){
   try{
     const s=localStorage.getItem('cron2');
     if(s)e={...e,...JSON.parse(s)};
-    if(!e.titulos)e.titulos={}
+    if(!e.titulos)e.titulos={};
+    if(!e.dataReprogramacao)e.dataReprogramacao=null;
   }catch{}
   if(!e.cron.length)gen()
 }
@@ -215,7 +217,7 @@ function gen(){
 }
 
 function ntf(msg,tp='ok'){
-  const cor={ok:'bg-green-500',er:'bg-red-500'};
+  const cor={ok:'bg-green-500',er:'bg-red-500',warn:'bg-yellow-500'};
   const dv=document.createElement('div');
   dv.className=`${cor[tp]} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
   dv.textContent=msg;
@@ -233,10 +235,51 @@ function getStatus(dia,completo){
   if(completo)return 'completo';
   const hoje=new Date();
   hoje.setHours(0,0,0,0);
-  const dataInicio=new Date(2026,0,6);
+  
+  // Se foi reprogramado, usa a nova data base
+  const dataInicio = e.dataReprogramacao ? new Date(e.dataReprogramacao) : new Date(2026,0,6);
   const diasPassados=Math.floor((hoje-dataInicio)/(1000*60*60*24));
   const diaEsperado=Math.ceil(diasPassados/1.75);
+  
   return dia<=diaEsperado?'atrasado':'pendente'
+}
+
+// NOVA FUNÇÃO: Reprogramar dias atrasados
+function reprogramarAtrasados(){
+  const hoje = new Date();
+  hoje.setHours(0,0,0,0);
+  
+  // Encontra o primeiro dia pendente (não completo)
+  const primeiroPendente = e.cron.find(d => !d.c);
+  
+  if (!primeiroPendente) {
+    ntf('✅ Não há dias pendentes para reprogramar!', 'ok');
+    return;
+  }
+  
+  const status = getStatus(primeiroPendente.d, false);
+  
+  if (status !== 'atrasado') {
+    ntf('✅ Você não tem aulas atrasadas!', 'ok');
+    return;
+  }
+  
+  const confirmar = confirm(
+    `🔄 REPROGRAMAR CRONOGRAMA\n\n` +
+    `Primeiro dia pendente: Dia ${primeiroPendente.d}\n` +
+    `Isso ajustará a data base para considerar que você está começando hoje.\n\n` +
+    `Deseja continuar?`
+  );
+  
+  if (!confirmar) return;
+  
+  // Salva a data de reprogramação
+  e.dataReprogramacao = hoje.toISOString();
+  
+  sv();
+  rend();
+  ntf('🎉 Cronograma reprogramado com sucesso!', 'ok');
+  ntf(`📅 Nova data base: ${hoje.toLocaleDateString('pt-BR')}`, 'ok');
 }
 
 function salvarTitulo(dia,val){
@@ -305,6 +348,7 @@ function imp(ev){
     try{
       e={...e,...JSON.parse(x.target.result)};
       if(!e.titulos)e.titulos={};
+      if(!e.dataReprogramacao)e.dataReprogramacao=null;
       sv();
       rend();
       ntf('📥 Importado!')
@@ -340,6 +384,9 @@ function rend(){
   const ms=e.cron.reduce((ac,d)=>{if(!ac[d.m])ac[d.m]=[];ac[d.m].push(d);return ac},{});
   const mn=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
   
+  // Verifica se há dias atrasados
+  const temAtrasados = e.cron.some(d => !d.c && getStatus(d.d, false) === 'atrasado');
+  
   document.getElementById('app').innerHTML=`
 <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
 <div class="flex justify-between items-start gap-4 mb-6 flex-wrap">
@@ -347,8 +394,10 @@ function rend(){
   <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
   <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
   <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,12)}...</button>
+  ${e.dataReprogramacao ? `<p class="text-xs text-purple-600 mt-1">🔄 Reprogramado em: ${new Date(e.dataReprogramacao).toLocaleDateString('pt-BR')}</p>` : ''}
 </div>
 <div class="flex gap-2 flex-wrap">
+${temAtrasados ? `<button onclick="reprogramarAtrasados()" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 text-sm font-bold shadow-lg animate-pulse">🔄 Reprogramar Atrasados</button>` : ''}
 <button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
 <label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
 <button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
@@ -377,6 +426,15 @@ ${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Da
 <div class="bg-white/50 rounded-lg p-3"><p class="font-bold mb-2">📋 Plano:</p><ul class="space-y-1 text-xs"><li>• ${e.cron.length} dias programados</li><li>• 4 aulas/dia, 4 dias/semana</li><li>• Anote os títulos das aulas assistidas</li><li>• Clique "✅ OK" após estudar</li><li>• 4 revisões geradas automaticamente</li></ul></div>
 <div class="bg-white/50 rounded-lg p-3"><p class="font-bold mb-2">🔄 Revisões:</p><ul class="space-y-1 text-xs"><li>• 📅 Primeira em 7 dias</li><li>• 📅 Segunda em 14 dias</li><li>• 📅 Terceira em 30 dias</li><li>• 📅 Última em 60 dias</li><li>• Os títulos aparecem nas revisões!</li></ul></div>
 </div>
+<div class="mt-4 bg-orange-50 border-2 border-orange-300 rounded-lg p-3">
+<p class="font-bold text-orange-900 mb-2">🔄 Reprogramação Automática:</p>
+<ul class="space-y-1 text-xs text-orange-800">
+<li>✅ Se você ficou atrasado, clique em "🔄 Reprogramar Atrasados"</li>
+<li>✅ O sistema ajusta automaticamente a data base</li>
+<li>✅ Todos os dias pendentes são recalculados</li>
+<li>✅ Você volta ao ritmo sem perder dias completos!</li>
+</ul>
+</div>
 <div class="mt-4 bg-green-50 border-2 border-green-300 rounded-lg p-3">
 <p class="font-bold text-green-900 mb-2">☁️ Sincronização Automática:</p>
 <ul class="space-y-1 text-xs text-green-800">
@@ -399,6 +457,7 @@ ${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Da
   window.imp = imp;
   window.rst = rst;
   window.showUserId = showUserId;
+  window.reprogramarAtrasados = reprogramarAtrasados;
   window.e = e;
   window.rend = rend;
 }
