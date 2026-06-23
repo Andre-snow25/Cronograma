@@ -3,467 +3,695 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cronograma PC SP 2026 - Nuvem</title>
+<title>Cronograma PC SP 2026</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-body{font-family:system-ui}
-.fade{animation:f .3s}
-@keyframes f{from{opacity:0}to{opacity:1}}
-.tab-active{border-bottom:3px solid #4f46e5;color:#4f46e5}
-textarea{resize:vertical;min-height:60px}
-.sync-indicator{animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .tab-active { border-bottom: 3px solid #6366f1; color: #6366f1; font-weight: 700; }
+  .fade { animation: fadeIn .25s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  .sync-pulse { animation: syncPulse 1.8s infinite; }
+  @keyframes syncPulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+  .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
+  textarea { resize:vertical; min-height:52px; }
+  .card { transition: box-shadow .15s, transform .15s; }
+  .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.08); transform: translateY(-1px); }
+  details > summary { list-style: none; cursor: pointer; }
+  details > summary::-webkit-details-marker { display: none; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:100; display:flex; align-items:center; justify-content:center; }
+  .modal-box { background:#fff; border-radius:16px; padding:28px; max-width:420px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+  ::-webkit-scrollbar { width:6px; height:6px; }
+  ::-webkit-scrollbar-track { background:#f1f5f9; }
+  ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
 </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
-<div id="n" class="fixed top-4 right-4 z-50"></div>
+<body class="bg-slate-100 min-h-screen">
+
+<!-- Notificações -->
+<div id="notifs" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+<!-- Status sync -->
 <div id="sync-status" class="fixed top-4 left-4 z-50"></div>
-<div id="app" class="max-w-7xl mx-auto"></div>
+<!-- Modal -->
+<div id="modal" class="modal-overlay hidden"></div>
+
+<div id="app" class="max-w-5xl mx-auto px-4 py-6"></div>
 
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-const firebaseConfig = {
-  apiKey: "AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
-  authDomain: "cronograma-d352c.firebaseapp.com",
-  projectId: "cronograma-d352c",
-  storageBucket: "cronograma-d352c.firebasestorage.app",
-  messagingSenderId: "1035295977614",
-  appId: "1:1035295977614:web:e4ef9bfd959470f0b759df"
+const FB = {
+  apiKey:"AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
+  authDomain:"cronograma-d352c.firebaseapp.com",
+  projectId:"cronograma-d352c",
+  storageBucket:"cronograma-d352c.firebasestorage.app",
+  messagingSenderId:"1035295977614",
+  appId:"1:1035295977614:web:e4ef9bfd959470f0b759df"
+};
+const fbApp = initializeApp(FB);
+const db = getFirestore(fbApp);
+
+let userId = localStorage.getItem('userId');
+if (!userId) { userId = 'u_' + Math.random().toString(36).substr(2,9); localStorage.setItem('userId', userId); }
+
+// ─── Materiais ────────────────────────────────────────────────────────────────
+const MAT_ORIG = {
+  'Direito Penal – Parte Geral':53,
+  'Direito Penal – Parte Especial':151,
+  'Direito Processual Penal':53,
+  'Legislação Penal Especial':168,
+  'Direito Constitucional':45,
+  'Criminologia':52,
+  'Princípios Constitucionais':30,
+  'Direitos Humanos':48,
+  'Controle de Constitucionalidade':25,
+  'Direito Penal Militar':35,
+  'Execução Penal':40,
+  'Tribunal do Júri':28,
+  'Lei de Drogas':20,
+  'Português':81,
+  'Raciocínio Lógico':101,
+  'Raciocínio Lógico (Matemático)':80,
+  'Informática':160,
+  'Informática (Teoria e Exercícios)':70,
+  'Matemática':90
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// ID único do usuário (pode ser personalizado depois)
-let userId = localStorage.getItem('userId');
-if (!userId) {
-  userId = 'user_' + Math.random().toString(36).substr(2, 9);
-  localStorage.setItem('userId', userId);
-}
-
-let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{},dataReprogramacao:null};
-let syncEnabled = true;
+// ─── Estado ───────────────────────────────────────────────────────────────────
+let E = {
+  aba: 'plano',
+  // cron: [{ id, ma, aulasTotal, aulasConcluidas, concluido, notas, deletado }]
+  cron: [],
+  // sessoes: [{ id, dt, cronId, ma, de, ate, qtd, notas }]
+  sessoes: [],
+  // revs: [{ id, sessaoId, ma, de, ate, qtd, notas, dr (dd/mm/yyyy), tipo(7d/14d/30d/60d), status(p/c) }]
+  revs: [],
+  stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
+  lastUpdated: ''
+};
 let isLoading = true;
 
-const mat={
-'Direito Penal – Parte Geral':53,
-'Direito Penal – Parte Especial':151,
-'Direito Processual Penal':53,
-'Legislação Penal Especial':168,
-'Direito Constitucional':45,
-'Criminologia':52,
-'Princípios Constitucionais':30,
-'Direitos Humanos':48,
-'Controle de Constitucionalidade':25,
-'Direito Penal Militar':35,
-'Execução Penal':40,
-'Tribunal do Júri':28,
-'Lei de Drogas':20,
-'Português':81,
-'Raciocínio Lógico':101,
-'Raciocínio Lógico (Matemático)':80,
-'Informática':160,
-'Informática (Teoria e Exercícios)':70,
-'Matemática':90
-};
+// ─── Helpers de data ──────────────────────────────────────────────────────────
+function hoje() {
+  const d = new Date(); d.setHours(0,0,0,0); return d;
+}
+function parseDMY(s) {
+  const [d,m,y] = s.split('/'); return new Date(+y, +m-1, +d);
+}
+function fmtDMY(d) {
+  return d.toLocaleDateString('pt-BR');
+}
+function addDays(d, n) {
+  const r = new Date(d); r.setDate(r.getDate()+n); return r;
+}
+function cmpDMY(a, b) {
+  return parseDMY(a) - parseDMY(b);
+}
 
-function showSyncStatus(msg, type='info') {
-  const colors = {
-    info: 'bg-blue-500',
-    success: 'bg-green-500',
-    error: 'bg-red-500',
-    syncing: 'bg-yellow-500'
-  };
-  const icons = {
-    info: '☁️',
-    success: '✅',
-    error: '❌',
-    syncing: '🔄'
-  };
+// ─── Sync nuvem ───────────────────────────────────────────────────────────────
+function showSync(msg, tp='info') {
+  const col = {info:'bg-blue-500',success:'bg-emerald-500',error:'bg-red-500',syncing:'bg-amber-500'};
+  const ic  = {info:'☁️',success:'✅',error:'❌',syncing:'🔄'};
   document.getElementById('sync-status').innerHTML = `
-    <div class="${colors[type]} text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${type === 'syncing' ? 'sync-indicator' : ''}">
-      <span>${icons[type]}</span>
-      <span class="text-sm font-medium">${msg}</span>
-    </div>
-  `;
-  if (type !== 'syncing') {
-    setTimeout(() => {
-      document.getElementById('sync-status').innerHTML = '';
-    }, 3000);
-  }
+    <div class="${col[tp]} text-white px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium ${tp==='syncing'?'sync-pulse':''}">
+      ${ic[tp]} ${msg}
+    </div>`;
+  if (tp !== 'syncing') setTimeout(()=>{ document.getElementById('sync-status').innerHTML=''; }, 2800);
 }
 
-async function saveToCloud() {
-  if (!syncEnabled) return;
+async function saveCloud() {
   try {
-    showSyncStatus('Sincronizando...', 'syncing');
-    const docRef = doc(db, 'cronogramas', userId);
-    await setDoc(docRef, {
-      ...e,
-      lastUpdated: new Date().toISOString()
-    });
-    showSyncStatus('Salvo na nuvem!', 'success');
-  } catch (error) {
-    console.error('Erro ao salvar:', error);
-    showSyncStatus('Erro ao sincronizar', 'error');
+    showSync('Sincronizando...','syncing');
+    E.lastUpdated = new Date().toISOString();
+    await setDoc(doc(db,'cronogramas',userId), E);
+    showSync('Salvo na nuvem!','success');
+  } catch(err) {
+    console.error(err); showSync('Erro ao sincronizar','error');
   }
+  try { localStorage.setItem('cron3', JSON.stringify(E)); } catch {}
 }
 
-async function loadFromCloud() {
+async function loadCloud() {
   try {
-    showSyncStatus('Carregando da nuvem...', 'syncing');
-    const docRef = doc(db, 'cronogramas', userId);
-    const docSnap = await getDoc(docRef);
-    
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      e = {...e, ...data};
-      if (!e.titulos) e.titulos = {};
-      if (!e.dataReprogramacao) e.dataReprogramacao = null;
-      if (!e.cron.length) gen();
-      showSyncStatus('Carregado da nuvem!', 'success');
+    showSync('Carregando...','syncing');
+    const snap = await getDoc(doc(db,'cronogramas',userId));
+    if (snap.exists()) {
+      const d = snap.data();
+      E = { ...E, ...d };
+      migrate();
     } else {
-      // Primeiro acesso, gera cronograma
-      gen();
-      await saveToCloud();
+      genCron();
+      await saveCloud();
     }
     isLoading = false;
-    rend();
-    setupRealtimeSync();
-  } catch (error) {
-    console.error('Erro ao carregar:', error);
-    showSyncStatus('Erro ao carregar', 'error');
-    // Fallback para localStorage
-    ld();
+    render();
+    setupRealtime();
+  } catch(err) {
+    console.error(err); showSync('Erro ao carregar','error');
+    try { const s=localStorage.getItem('cron3'); if(s) E={...E,...JSON.parse(s)}; } catch {}
+    migrate();
+    if (!E.cron.length) genCron();
     isLoading = false;
-    rend();
+    render();
   }
 }
 
-function setupRealtimeSync() {
-  const docRef = doc(db, 'cronogramas', userId);
-  onSnapshot(docRef, (doc) => {
-    if (doc.exists() && !isLoading) {
-      const data = doc.data();
-      // Atualiza apenas se houve mudança de outro dispositivo
-      const currentUpdate = e.lastUpdated || '';
-      const cloudUpdate = data.lastUpdated || '';
-      if (cloudUpdate > currentUpdate) {
-        e = {...e, ...data};
-        rend();
+function setupRealtime() {
+  onSnapshot(doc(db,'cronogramas',userId), snap => {
+    if (snap.exists() && !isLoading) {
+      const d = snap.data();
+      if ((d.lastUpdated||'') > (E.lastUpdated||'')) {
+        E = { ...E, ...d };
+        render();
         ntf('🔄 Atualizado de outro dispositivo!');
       }
     }
   });
 }
 
-function sv(){
-  saveToCloud();
-  // Backup local também
-  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
+// migração de dados antigos
+function migrate() {
+  if (!E.cron) E.cron = [];
+  if (!E.sessoes) E.sessoes = [];
+  if (!E.revs) E.revs = [];
+  if (!E.stats) E.stats = { aulasFeitas:0, sessoes:0, revsFeitas:0 };
+  // campo deletado
+  E.cron.forEach(c => { if (c.deletado === undefined) c.deletado = false; });
 }
 
-function ld(){
-  try{
-    const s=localStorage.getItem('cron2');
-    if(s)e={...e,...JSON.parse(s)};
-    if(!e.titulos)e.titulos={};
-    if(!e.dataReprogramacao)e.dataReprogramacao=null;
-  }catch{}
-  if(!e.cron.length)gen()
+// ─── Gerar cronograma inicial ─────────────────────────────────────────────────
+function genCron() {
+  E.cron = Object.entries(MAT_ORIG).map(([ma, total], i) => ({
+    id: 'c' + i,
+    ma,
+    aulasTotal: total,
+    aulasConcluidas: 0,
+    concluido: false,
+    notas: '',
+    deletado: false
+  }));
 }
 
-function gen(){
-  const c=[];
-  let d=1,s=1,m=1;
-  const ordem=[
-    'Direito Penal – Parte Geral',
-    'Direito Penal – Parte Especial',
-    'Direito Processual Penal',
-    'Legislação Penal Especial',
-    'Direito Constitucional',
-    'Criminologia',
-    'Princípios Constitucionais',
-    'Direitos Humanos',
-    'Controle de Constitucionalidade',
-    'Direito Penal Militar',
-    'Execução Penal',
-    'Tribunal do Júri',
-    'Lei de Drogas',
-    'Português',
-    'Raciocínio Lógico',
-    'Raciocínio Lógico (Matemático)',
-    'Informática',
-    'Informática (Teoria e Exercícios)',
-    'Matemática'
+// ─── Notificações ─────────────────────────────────────────────────────────────
+function ntf(msg, tp='ok') {
+  const col = {ok:'bg-emerald-500',er:'bg-red-500',warn:'bg-amber-500',info:'bg-blue-500'};
+  const el = document.createElement('div');
+  el.className = `${col[tp]} text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium fade`;
+  el.textContent = msg;
+  document.getElementById('notifs').appendChild(el);
+  setTimeout(()=>el.remove(), 3200);
+}
+
+// ─── Modal genérico ───────────────────────────────────────────────────────────
+function openModal(html, onConfirm) {
+  const m = document.getElementById('modal');
+  m.classList.remove('hidden');
+  m.innerHTML = `<div class="modal-box fade">${html}</div>`;
+  if (onConfirm) {
+    m.querySelector('#modal-confirm')?.addEventListener('click', ()=>{ closeModal(); onConfirm(); });
+  }
+  m.querySelector('#modal-cancel')?.addEventListener('click', closeModal);
+}
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+  document.getElementById('modal').innerHTML = '';
+}
+
+// ─── Revisões: distribuição (máx 2/dia) ──────────────────────────────────────
+function proximaDataDisponivel(dataBase) {
+  // conta revisões por data
+  const contagem = {};
+  E.revs.filter(r=>r.status==='p').forEach(r=>{ contagem[r.dr] = (contagem[r.dr]||0)+1; });
+
+  let d = new Date(dataBase);
+  for (let i=0; i<365; i++) {
+    const k = fmtDMY(d);
+    if ((contagem[k]||0) < 2) return k;
+    d = addDays(d, 1);
+  }
+  return fmtDMY(dataBase);
+}
+
+function gerarRevisoes(sessao, data1rev) {
+  // data1rev: Date
+  const intervalos = [
+    { tipo:'7d',  dias:0 },   // data1 escolhida pelo usuário
+    { tipo:'14d', dias:7 },
+    { tipo:'30d', dias:23 },
+    { tipo:'60d', dias:53 }
   ];
-  ordem.forEach(ma=>{
-    if(!mat[ma])return;
-    const t=mat[ma];
-    let a=1;
-    while(a<=t){
-      const f=Math.min(a+3,t);
-      c.push({d:d,s:s,m:m,ma:ma,i:a,f:f,q:f-a+1,c:false});
-      a=f+1;
-      d++;
-      if(d%4===1)s++;
-      if(d%16===1&&d>1)m++
+  const contagem = {};
+  E.revs.filter(r=>r.status==='p').forEach(r=>{ contagem[r.dr]=(contagem[r.dr]||0)+1; });
+
+  let base = new Date(data1rev);
+  intervalos.forEach(({tipo, dias}) => {
+    let d = addDays(base, dias);
+    // empurra se já tem 2 revisões
+    for (let i=0; i<365; i++) {
+      const k = fmtDMY(d);
+      if ((contagem[k]||0) < 2) {
+        contagem[k] = (contagem[k]||0)+1;
+        E.revs.push({
+          id: `r${Date.now()}_${tipo}_${Math.random().toString(36).substr(2,4)}`,
+          sessaoId: sessao.id,
+          ma: sessao.ma,
+          de: sessao.de,
+          ate: sessao.ate,
+          qtd: sessao.qtd,
+          notas: sessao.notas,
+          dr: k,
+          tipo,
+          status: 'p'
+        });
+        break;
+      }
+      d = addDays(d, 1);
     }
   });
-  e.cron=c;
-  sv()
 }
 
-function ntf(msg,tp='ok'){
-  const cor={ok:'bg-green-500',er:'bg-red-500',warn:'bg-yellow-500'};
-  const dv=document.createElement('div');
-  dv.className=`${cor[tp]} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
-  dv.textContent=msg;
-  document.getElementById('n').appendChild(dv);
-  setTimeout(()=>dv.remove(),3000)
-}
+// ─── Reorganizar atrasos ──────────────────────────────────────────────────────
+function reorganizarAtrasos() {
+  const hj = hoje();
+  const hjStr = fmtDMY(hj);
 
-function dt(ds){
-  const h=new Date();
-  h.setDate(h.getDate()+ds);
-  return h.toLocaleDateString('pt-BR')
-}
+  // Pega revisões pendentes atrasadas e as redistribui a partir de hoje
+  const pendAtrasadas = E.revs
+    .filter(r => r.status === 'p' && parseDMY(r.dr) < hj)
+    .sort((a,b) => cmpDMY(a.dr, b.dr));
 
-function getStatus(dia,completo){
-  if(completo)return 'completo';
-  const hoje=new Date();
-  hoje.setHours(0,0,0,0);
-  
-  // Se foi reprogramado, usa a nova data base
-  const dataInicio = e.dataReprogramacao ? new Date(e.dataReprogramacao) : new Date(2026,0,6);
-  const diasPassados=Math.floor((hoje-dataInicio)/(1000*60*60*24));
-  const diaEsperado=Math.ceil(diasPassados/1.75);
-  
-  return dia<=diaEsperado?'atrasado':'pendente'
-}
+  if (!pendAtrasadas.length) { ntf('✅ Nenhum atraso encontrado!'); return; }
 
-// NOVA FUNÇÃO: Reprogramar dias atrasados
-function reprogramarAtrasados(){
-  const hoje = new Date();
-  hoje.setHours(0,0,0,0);
-  
-  // Encontra o primeiro dia pendente (não completo)
-  const primeiroPendente = e.cron.find(d => !d.c);
-  
-  if (!primeiroPendente) {
-    ntf('✅ Não há dias pendentes para reprogramar!', 'ok');
-    return;
-  }
-  
-  const status = getStatus(primeiroPendente.d, false);
-  
-  if (status !== 'atrasado') {
-    ntf('✅ Você não tem aulas atrasadas!', 'ok');
-    return;
-  }
-  
-  const confirmar = confirm(
-    `🔄 REPROGRAMAR CRONOGRAMA\n\n` +
-    `Primeiro dia pendente: Dia ${primeiroPendente.d}\n` +
-    `Isso ajustará a data base para considerar que você está começando hoje.\n\n` +
-    `Deseja continuar?`
-  );
-  
-  if (!confirmar) return;
-  
-  // Salva a data de reprogramação
-  e.dataReprogramacao = hoje.toISOString();
-  
-  sv();
-  rend();
-  ntf('🎉 Cronograma reprogramado com sucesso!', 'ok');
-  ntf(`📅 Nova data base: ${hoje.toLocaleDateString('pt-BR')}`, 'ok');
-}
-
-function salvarTitulo(dia,val){
-  e.titulos[dia]=val;
-  sv();
-  ntf('💾 Título salvo!')
-}
-
-function cDia(idx){
-  const d=e.cron[idx];
-  const titulo=e.titulos[d.d]||'';
-  const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:d.ma,i:d.i,f:d.f,q:d.q,titulo:titulo};
-  e.dias.push(ds);
-  e.stats.a+=d.q;
-  e.stats.d++;
-  e.cron[idx].c=true;
-  [{t:'7d',ds:7,cor:'amber'},{t:'14d',ds:14,cor:'orange'},{t:'30d',ds:30,cor:'purple'},{t:'60d',ds:60,cor:'blue'}].forEach(r=>{
-    e.revs.push({id:`${ds.id}-${r.t}`,di:ds.id,ma:d.ma,i:d.i,f:d.f,q:d.q,titulo:titulo,dr:dt(r.ds),t:r.t,s:'p',cor:r.cor})
+  // Limpa as datas atrasadas e redistribui
+  const contagem = {};
+  E.revs.filter(r=>r.status==='p' && parseDMY(r.dr)>=hj).forEach(r=>{
+    contagem[r.dr]=(contagem[r.dr]||0)+1;
   });
-  sv();
-  rend();
-  ntf(`🎉 Dia ${d.d} OK!`)
-}
 
-function mkR(id){
-  const r=e.revs.find(x=>x.id===id);
-  if(r){
-    r.s='c';
-    e.stats.r++;
-    sv();
-    rend();
-    ntf('✅ Revisão OK!')
-  }
-}
-
-function editData(id){
-  const r=e.revs.find(x=>x.id===id);
-  if(!r)return;
-  const novaData=prompt('📅 Nova data da revisão (dd/mm/aaaa):',r.dr);
-  if(novaData&&/^\d{2}\/\d{2}\/\d{4}$/.test(novaData)){
-    r.dr=novaData;
-    sv();
-    rend();
-    ntf('📅 Data atualizada!')
-  }else if(novaData){
-    ntf('❌ Formato inválido! Use dd/mm/aaaa','er')
-  }
-}
-
-function exp(){
-  const b=new Blob([JSON.stringify(e,null,2)],{type:'application/json'});
-  const u=URL.createObjectURL(b);
-  const a=document.createElement('a');
-  a.href=u;
-  a.download=`backup-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();
-  URL.revokeObjectURL(u);
-  ntf('💾 Exportado!')
-}
-
-function imp(ev){
-  const f=ev.target.files[0];
-  if(!f)return;
-  const r=new FileReader();
-  r.onload=x=>{
-    try{
-      e={...e,...JSON.parse(x.target.result)};
-      if(!e.titulos)e.titulos={};
-      if(!e.dataReprogramacao)e.dataReprogramacao=null;
-      sv();
-      rend();
-      ntf('📥 Importado!')
-    }catch{
-      ntf('❌ Erro','er')
+  pendAtrasadas.forEach(r => {
+    let d = new Date(hj);
+    for (let i=0; i<365; i++) {
+      const k = fmtDMY(d);
+      if ((contagem[k]||0) < 2) {
+        contagem[k]=(contagem[k]||0)+1;
+        r.dr = k;
+        break;
+      }
+      d = addDays(d,1);
     }
+  });
+
+  saveCloud(); render();
+  ntf(`🔄 ${pendAtrasadas.length} revisão(ões) redistribuída(s)!`);
+}
+
+// ─── Ações principais ─────────────────────────────────────────────────────────
+function abrirModalConcluir(cronId) {
+  const item = E.cron.find(c=>c.id===cronId);
+  if (!item) return;
+  const restante = item.aulasTotal - item.aulasConcluidas;
+
+  const html = `
+    <h3 class="text-lg font-bold mb-4">✅ Registrar estudo</h3>
+    <p class="text-sm text-gray-600 mb-1 font-semibold">${item.ma}</p>
+    <p class="text-xs text-gray-400 mb-4">${item.aulasConcluidas} de ${item.aulasTotal} aulas concluídas • ${restante} restantes</p>
+
+    <label class="block text-sm font-semibold mb-1">Quantas aulas você estudou?</label>
+    <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
+
+    <label class="block text-sm font-semibold mb-1">📅 Data da 1ª revisão</label>
+    <input id="m-data1rev" type="date"
+      value="${new Date(Date.now()+7*864e5).toISOString().split('T')[0]}"
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 focus:border-indigo-500 focus:outline-none">
+
+    <label class="block text-sm font-semibold mb-1">📝 Anotações (opcional)</label>
+    <textarea id="m-notas" placeholder="Títulos das aulas, pontos importantes..." class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none text-sm"></textarea>
+
+    <div class="flex gap-3">
+      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+      <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
+    </div>`;
+
+  openModal(html, () => {
+    const qtd = Math.max(1, Math.min(restante, parseInt(document.getElementById('m-qtd').value)||1));
+    const data1str = document.getElementById('m-data1rev').value;
+    const notas = document.getElementById('m-notas').value.trim();
+
+    if (!data1str) { ntf('Informe a data da 1ª revisão','er'); return; }
+    const data1 = new Date(data1str + 'T12:00:00');
+
+    const de = item.aulasConcluidas + 1;
+    const ate = item.aulasConcluidas + qtd;
+
+    const sessao = {
+      id: 's' + Date.now(),
+      dt: fmtDMY(hoje()),
+      cronId,
+      ma: item.ma,
+      de, ate, qtd, notas
+    };
+    E.sessoes.push(sessao);
+    item.aulasConcluidas += qtd;
+    if (item.aulasConcluidas >= item.aulasTotal) item.concluido = true;
+    E.stats.aulasFeitas += qtd;
+    E.stats.sessoes++;
+
+    gerarRevisoes(sessao, data1);
+    saveCloud(); render();
+    ntf(`🎉 +${qtd} aula(s) registrada(s) em ${item.ma}!`);
+  });
+}
+
+function confirmarExcluir(cronId) {
+  const item = E.cron.find(c=>c.id===cronId);
+  if (!item) return;
+  const html = `
+    <h3 class="text-lg font-bold mb-3">🗑️ Excluir matéria</h3>
+    <p class="text-sm text-gray-600 mb-5">Tem certeza que deseja remover <strong>${item.ma}</strong> do cronograma? Esta ação não pode ser desfeita.</p>
+    <div class="flex gap-3">
+      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+      <button id="modal-confirm" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold hover:bg-red-600">Excluir</button>
+    </div>`;
+  openModal(html, () => {
+    item.deletado = true;
+    saveCloud(); render();
+    ntf('🗑️ Matéria removida do cronograma');
+  });
+}
+
+function marcarRevisao(revId) {
+  const r = E.revs.find(x=>x.id===revId);
+  if (!r) return;
+  r.status = 'c';
+  E.stats.revsFeitas++;
+  saveCloud(); render();
+  ntf('✅ Revisão concluída!');
+}
+
+function editarDataRev(revId) {
+  const r = E.revs.find(x=>x.id===revId);
+  if (!r) return;
+  // converter dd/mm/yyyy → yyyy-mm-dd para input date
+  const [d,m,y] = r.dr.split('/');
+  const html = `
+    <h3 class="text-lg font-bold mb-4">📅 Alterar data da revisão</h3>
+    <p class="text-sm text-gray-500 mb-4">${r.ma} · ${r.tipo}</p>
+    <input id="m-novaData" type="date" value="${y}-${m}-${d}"
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none">
+    <div class="flex gap-3">
+      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Salvar</button>
+    </div>`;
+  openModal(html, () => {
+    const v = document.getElementById('m-novaData').value;
+    if (!v) return;
+    const [yy,mm,dd] = v.split('-');
+    r.dr = `${dd}/${mm}/${yy}`;
+    saveCloud(); render();
+    ntf('📅 Data atualizada!');
+  });
+}
+
+function exportar() {
+  const b = new Blob([JSON.stringify(E,null,2)],{type:'application/json'});
+  const u = URL.createObjectURL(b);
+  const a = document.createElement('a'); a.href=u;
+  a.download = `backup-pcsp-${new Date().toISOString().split('T')[0]}.json`;
+  a.click(); URL.revokeObjectURL(u);
+  ntf('💾 Exportado!');
+}
+
+function importar(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = x => {
+    try {
+      E = {...E,...JSON.parse(x.target.result)};
+      migrate(); saveCloud(); render(); ntf('📥 Importado!');
+    } catch { ntf('❌ Arquivo inválido','er'); }
   };
-  r.readAsText(f)
+  r.readAsText(f);
 }
 
-function rst(){
-  if(confirm('⚠️ Resetar tudo? Isto apagará os dados da nuvem também!')){
-    saveToCloud().then(() => {
-      localStorage.removeItem('cron2');
-      location.reload()
-    })
+function resetar() {
+  const html = `
+    <h3 class="text-lg font-bold mb-3">⚠️ Resetar tudo</h3>
+    <p class="text-sm text-gray-600 mb-5">Isso apagará <strong>todo o progresso</strong>, inclusive na nuvem. Não pode ser desfeito.</p>
+    <div class="flex gap-3">
+      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button id="modal-confirm" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold">Resetar</button>
+    </div>`;
+  openModal(html, () => { localStorage.removeItem('cron3'); location.reload(); });
+}
+
+function mostrarId() {
+  const html = `
+    <h3 class="text-lg font-bold mb-3">🆔 Seu ID de usuário</h3>
+    <p class="text-sm text-gray-500 mb-3">Copie este ID para acessar seus dados em outro dispositivo.</p>
+    <div class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all mb-4 select-all">${userId}</div>
+    <label class="block text-sm font-semibold mb-1">Ou cole outro ID:</label>
+    <input id="m-novoId" placeholder="Cole o ID aqui..." class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none text-sm">
+    <div class="flex gap-3">
+      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Fechar</button>
+      <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
+    </div>`;
+  openModal(html, () => {
+    const nv = document.getElementById('m-novoId').value.trim();
+    if (nv && nv !== userId) {
+      userId = nv; localStorage.setItem('userId', userId); location.reload();
+    }
+  });
+}
+
+// ─── Render ───────────────────────────────────────────────────────────────────
+function render() {
+  const hj = hoje();
+  const totalAulas = E.cron.filter(c=>!c.deletado).reduce((s,c)=>s+c.aulasTotal,0);
+  const pg = totalAulas ? (E.stats.aulasFeitas/totalAulas*100).toFixed(1) : '0.0';
+  const revsPend = E.revs.filter(r=>r.status==='p').length;
+  const temAtrasados = E.revs.some(r=>r.status==='p' && parseDMY(r.dr)<hj);
+
+  const ativas = E.cron.filter(c=>!c.deletado && !c.concluido);
+  const concluidas = E.cron.filter(c=>!c.deletado && c.concluido);
+
+  document.getElementById('app').innerHTML = `
+<div class="fade">
+  <!-- Cabeçalho -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-5">
+    <div class="flex justify-between items-start gap-4 flex-wrap mb-5">
+      <div>
+        <h1 class="text-2xl font-extrabold text-slate-800">📚 Cronograma PC SP 2026</h1>
+        <p class="text-slate-500 text-sm mt-1">Revisão espaçada · Sincronização em nuvem ☁️</p>
+        <button onclick="mostrarId()" class="text-xs text-indigo-500 hover:underline mt-1">🆔 ${userId.substr(0,14)}...</button>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        ${temAtrasados ? `<button onclick="reorganizarAtrasos()" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow">⚡ Reorganizar atrasos</button>` : ''}
+        <button onclick="exportar()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">💾 Exportar</button>
+        <label class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="importar(event)" class="hidden"></label>
+        <button onclick="resetar()" class="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium">🔄 Resetar</button>
+      </div>
+    </div>
+    <!-- Stats -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="bg-indigo-50 rounded-xl p-4">
+        <p class="text-xs font-bold text-indigo-500 uppercase tracking-wide mb-1">Aulas feitas</p>
+        <p class="text-3xl font-extrabold text-indigo-700">${E.stats.aulasFeitas}</p>
+        <p class="text-xs text-indigo-400 mt-1">de ${totalAulas}</p>
+      </div>
+      <div class="bg-emerald-50 rounded-xl p-4">
+        <p class="text-xs font-bold text-emerald-500 uppercase tracking-wide mb-1">Progresso</p>
+        <p class="text-3xl font-extrabold text-emerald-700">${pg}%</p>
+        <div class="mt-2 bg-emerald-200 rounded-full h-1.5"><div class="bg-emerald-500 h-1.5 rounded-full" style="width:${pg}%"></div></div>
+      </div>
+      <div class="bg-violet-50 rounded-xl p-4">
+        <p class="text-xs font-bold text-violet-500 uppercase tracking-wide mb-1">Matérias</p>
+        <p class="text-3xl font-extrabold text-violet-700">${concluidas.length}</p>
+        <p class="text-xs text-violet-400 mt-1">de ${ativas.length+concluidas.length} concluídas</p>
+      </div>
+      <div class="bg-amber-50 rounded-xl p-4">
+        <p class="text-xs font-bold text-amber-500 uppercase tracking-wide mb-1">Revisões</p>
+        <p class="text-3xl font-extrabold text-amber-700">${revsPend}</p>
+        <p class="text-xs text-amber-400 mt-1">${E.stats.revsFeitas} feitas</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Abas -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-5">
+    <div class="flex border-b border-slate-100">
+      <button onclick="E.aba='plano';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='plano'?'tab-active':'text-slate-500 hover:text-slate-700'}">📋 Plano de Estudo</button>
+      <button onclick="E.aba='revs';render()" class="flex-1 px-6 py-4 text-sm font-semibold relative ${E.aba==='revs'?'tab-active':'text-slate-500 hover:text-slate-700'}">
+        🔄 Revisões
+        ${revsPend>0?`<span class="absolute top-3 right-3 bg-amber-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">${revsPend}</span>`:''}
+      </button>
+      <button onclick="E.aba='historico';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='historico'?'tab-active':'text-slate-500 hover:text-slate-700'}">📈 Histórico</button>
+    </div>
+
+    <div class="p-6">
+      ${E.aba==='plano' ? renderPlano(ativas, concluidas) : ''}
+      ${E.aba==='revs'  ? renderRevisoes() : ''}
+      ${E.aba==='historico' ? renderHistorico() : ''}
+    </div>
+  </div>
+</div>`;
+
+  // expõe funções globais
+  Object.assign(window, {
+    E, render, abrirModalConcluir, confirmarExcluir,
+    marcarRevisao, editarDataRev, mostrarId,
+    exportar, importar, resetar, reorganizarAtrasos
+  });
+}
+
+function renderPlano(ativas, concluidas) {
+  return `
+    <!-- Pendentes -->
+    <div class="mb-8">
+      <h2 class="text-base font-bold text-slate-700 mb-4 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>
+        Em andamento <span class="text-slate-400 font-normal text-sm">(${ativas.length})</span>
+      </h2>
+      ${ativas.length === 0 ? `<div class="text-center py-12 text-slate-400"><p class="text-4xl mb-2">🎉</p><p>Todas as matérias concluídas!</p></div>` : `
+      <div class="grid md:grid-cols-2 gap-3">
+        ${ativas.map(c => cardMateria(c, false)).join('')}
+      </div>`}
+    </div>
+
+    <!-- Concluídas -->
+    ${concluidas.length > 0 ? `
+    <details>
+      <summary class="text-base font-bold text-slate-700 mb-4 flex items-center gap-2 select-none">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+        Concluídas <span class="text-slate-400 font-normal text-sm">(${concluidas.length})</span>
+        <span class="ml-auto text-xs text-slate-400">▼ expandir</span>
+      </summary>
+      <div class="grid md:grid-cols-2 gap-3 mt-4">
+        ${concluidas.map(c => cardMateria(c, true)).join('')}
+      </div>
+    </details>` : ''}`;
+}
+
+function cardMateria(c, done) {
+  const pct = c.aulasTotal ? Math.round(c.aulasConcluidas/c.aulasTotal*100) : 0;
+  const barColor = done ? 'bg-emerald-400' : 'bg-indigo-500';
+  const border = done ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-white';
+  const sessoesMat = E.sessoes.filter(s=>s.cronId===c.id);
+
+  return `
+    <div class="card border-2 ${border} rounded-xl p-4">
+      <div class="flex justify-between items-start gap-3 mb-3">
+        <div class="flex-1 min-w-0">
+          <h4 class="font-bold text-slate-800 text-sm ${done?'line-through opacity-60':''} leading-snug">${c.ma}</h4>
+          <p class="text-xs text-slate-400 mt-1">${c.aulasConcluidas} / ${c.aulasTotal} aulas · ${sessoesMat.length} sessão(ões)</p>
+        </div>
+        <div class="flex gap-1.5 flex-shrink-0">
+          ${!done ? `<button onclick="abrirModalConcluir('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">+ Estudei</button>` : ''}
+          <button onclick="confirmarExcluir('${c.id}')" class="bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-xs font-bold" title="Excluir">🗑️</button>
+        </div>
+      </div>
+      <!-- Barra de progresso -->
+      <div class="bg-slate-100 rounded-full h-1.5 mb-2">
+        <div class="${barColor} h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+      </div>
+      <div class="flex justify-between text-xs text-slate-400">
+        <span>${pct}% concluído</span>
+        <span>${c.aulasTotal - c.aulasConcluidas} restantes</span>
+      </div>
+    </div>`;
+}
+
+function renderRevisoes() {
+  const hj = hoje();
+  const pendentes = E.revs.filter(r=>r.status==='p').sort((a,b)=>cmpDMY(a.dr,b.dr));
+  const concluidas = E.revs.filter(r=>r.status==='c').sort((a,b)=>cmpDMY(b.dr,a.dr));
+
+  const atrasadas = pendentes.filter(r=>parseDMY(r.dr)<hj);
+  const hoje_ = pendentes.filter(r=>fmtDMY(parseDMY(r.dr))===fmtDMY(hj));
+  const futuras = pendentes.filter(r=>parseDMY(r.dr)>hj);
+
+  const secRev = (titulo, lista, cor) => lista.length === 0 ? '' : `
+    <div class="mb-6">
+      <h3 class="text-sm font-bold text-slate-600 mb-3 uppercase tracking-wide">${titulo} (${lista.length})</h3>
+      <div class="space-y-2">
+        ${lista.map(r => cardRev(r, cor)).join('')}
+      </div>
+    </div>`;
+
+  const tipoCor = {
+    '7d':'indigo','14d':'violet','30d':'amber','60d':'rose'
+  };
+
+  function cardRev(r, destaque) {
+    const cor = tipoCor[r.tipo]||'slate';
+    return `
+      <div class="card border-2 ${destaque==='red'?'border-red-200 bg-red-50/30':destaque==='green'?'border-emerald-200 bg-emerald-50/30':'border-slate-200 bg-white'} rounded-xl p-4">
+        <div class="flex justify-between items-start gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-wrap gap-1.5 mb-2">
+              <span class="badge bg-${cor}-100 text-${cor}-700">${r.tipo}</span>
+              <span class="badge bg-slate-100 text-slate-600">Aulas ${r.de}–${r.ate}</span>
+              ${destaque==='red'?'<span class="badge bg-red-500 text-white">⚠️ Atrasada</span>':''}
+            </div>
+            <p class="font-semibold text-slate-800 text-sm leading-snug">${r.ma}</p>
+            <div class="flex items-center gap-2 mt-1.5">
+              <span class="text-xs text-slate-500">📅 ${r.dr}</span>
+              <button onclick="editarDataRev('${r.id}')" class="text-xs text-indigo-400 hover:text-indigo-600">✏️</button>
+            </div>
+            ${r.notas?`<div class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-600 whitespace-pre-wrap">${r.notas}</div>`:''}
+          </div>
+          <button onclick="marcarRevisao('${r.id}')" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0">✓ Feita</button>
+        </div>
+      </div>`;
   }
+
+  return pendentes.length === 0 && concluidas.length === 0
+    ? `<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">🔄</p><p>Nenhuma revisão ainda.</p><p class="text-sm mt-1">Registre sessões de estudo no Plano!</p></div>`
+    : `
+      ${secRev('⚠️ Atrasadas', atrasadas, 'red')}
+      ${secRev('📅 Hoje', hoje_, 'today')}
+      ${secRev('📆 Próximas', futuras, 'future')}
+      ${concluidas.length>0?`
+      <details class="mt-4">
+        <summary class="text-sm font-bold text-slate-500 cursor-pointer">✅ Concluídas (${concluidas.length}) ▼</summary>
+        <div class="space-y-2 mt-3 opacity-60">
+          ${concluidas.map(r=>`
+            <div class="border border-slate-200 rounded-xl p-3 bg-slate-50">
+              <div class="flex gap-2 mb-1 flex-wrap">
+                <span class="badge bg-slate-200 text-slate-600">${r.tipo}</span>
+                <span class="badge bg-emerald-100 text-emerald-700">✓ Concluída</span>
+              </div>
+              <p class="text-sm font-medium line-through text-slate-500">${r.ma}</p>
+              <p class="text-xs text-slate-400 mt-1">📅 ${r.dr} · Aulas ${r.de}–${r.ate}</p>
+            </div>`).join('')}
+        </div>
+      </details>`:''}`;
 }
 
-function showUserId() {
-  const newId = prompt('🆔 Seu ID de usuário (copie para usar em outro dispositivo):', userId);
-  if (newId && newId !== userId && confirm('Deseja trocar para este ID? Isso carregará os dados desse usuário.')) {
-    userId = newId;
-    localStorage.setItem('userId', userId);
-    location.reload();
-  }
+function renderHistorico() {
+  if (!E.sessoes.length) return `<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">📈</p><p>Nenhuma sessão registrada ainda.</p></div>`;
+
+  const sorted = [...E.sessoes].sort((a,b)=>b.id.localeCompare(a.id));
+  return `
+    <h2 class="text-base font-bold text-slate-700 mb-4">📈 Histórico de sessões (${E.sessoes.length})</h2>
+    <div class="space-y-2">
+      ${sorted.map(s=>`
+        <div class="border border-slate-200 rounded-xl p-4 bg-white card">
+          <div class="flex justify-between items-start gap-3">
+            <div>
+              <p class="font-semibold text-slate-800 text-sm">${s.ma}</p>
+              <p class="text-xs text-slate-400 mt-1">📅 ${s.dt} · Aulas ${s.de}–${s.ate} · ${s.qtd} aula(s)</p>
+              ${s.notas?`<p class="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap">${s.notas}</p>`:''}
+            </div>
+            <span class="badge bg-indigo-100 text-indigo-700 flex-shrink-0">${s.qtd} aulas</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
 }
 
-function rend(){
-  const pd=e.revs.filter(x=>x.s==='p').length;
-  const ta=Object.values(mat).reduce((s,v)=>s+v,0);
-  const pg=(e.stats.a/ta*100).toFixed(1);
-  const ms=e.cron.reduce((ac,d)=>{if(!ac[d.m])ac[d.m]=[];ac[d.m].push(d);return ac},{});
-  const mn=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-  
-  // Verifica se há dias atrasados
-  const temAtrasados = e.cron.some(d => !d.c && getStatus(d.d, false) === 'atrasado');
-  
-  document.getElementById('app').innerHTML=`
-<div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-<div class="flex justify-between items-start gap-4 mb-6 flex-wrap">
-<div>
-  <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
-  <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
-  <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,12)}...</button>
-  ${e.dataReprogramacao ? `<p class="text-xs text-purple-600 mt-1">🔄 Reprogramado em: ${new Date(e.dataReprogramacao).toLocaleDateString('pt-BR')}</p>` : ''}
-</div>
-<div class="flex gap-2 flex-wrap">
-${temAtrasados ? `<button onclick="reprogramarAtrasados()" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 text-sm font-bold shadow-lg animate-pulse">🔄 Reprogramar Atrasados</button>` : ''}
-<button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
-<label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
-<button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
-</div>
-</div>
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-<div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl"><p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p><p class="text-3xl font-bold text-indigo-700">${e.stats.a}</p><p class="text-xs text-indigo-600">de ${ta}</p></div>
-<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">📅 Dias</p><p class="text-3xl font-bold text-green-700">${e.stats.d}</p><p class="text-xs text-green-600">de ${e.cron.length}</p></div>
-<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📊 Progresso</p><p class="text-3xl font-bold text-purple-700">${pg}%</p></div>
-<div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p><p class="text-3xl font-bold text-orange-700">${pd}</p><p class="text-xs text-orange-600">${e.stats.r} completas</p></div>
-</div>
-</div>
-<div class="bg-white rounded-t-2xl shadow-xl">
-<div class="flex border-b overflow-x-auto">
-<button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
-<button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
-</div>
-</div>
-<div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
-${e.aba==='plano'?`<div><h2 class="text-2xl font-bold mb-4">📋 Plano 2026</h2><p class="text-sm text-gray-600 mb-6 bg-indigo-50 border-2 border-indigo-200 p-3 rounded-lg"><strong>${e.cron.length} dias</strong> • 4 aulas/dia • 4 dias/semana</p>${Object.keys(ms).map(m=>{const dm=ms[m];const co=dm.filter(x=>x.c).length;const pr=(co/dm.length*100).toFixed(0);return`<div class="mb-8"><div class="flex justify-between items-center mb-3 flex-wrap gap-2"><h3 class="text-xl font-bold">📅 ${mn[m-1]} 2026</h3><div class="flex items-center gap-3"><span class="text-sm text-gray-600">${co}/${dm.length}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-bold">${pr}%</span></div></div><div class="w-full bg-gray-200 rounded-full h-2 mb-4"><div class="bg-gradient-to-r from-indigo-500 to-purple-600 h-2 rounded-full transition-all" style="width:${pr}%"></div></div><div class="grid md:grid-cols-2 gap-3">${dm.map(d=>{const ix=e.cron.findIndex(x=>x.d===d.d&&x.ma===d.ma);const tit=e.titulos[d.d]||'';const status=getStatus(d.d,d.c);const cores={pendente:{border:'border-yellow-300',bg:'bg-yellow-50',btn:'bg-yellow-500 hover:bg-yellow-600'},completo:{border:'border-green-300',bg:'bg-green-50',btn:'bg-green-500'},atrasado:{border:'border-red-300',bg:'bg-red-50',btn:'bg-red-500 hover:bg-red-600'}};const cor=cores[status];return`<div class="border-2 ${cor.border} ${cor.bg} rounded-xl p-4 hover:shadow-lg transition-all"><div class="flex justify-between gap-3 mb-3"><div class="flex-1 min-w-0"><div class="flex gap-2 mb-2 flex-wrap"><span class="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-bold">Dia ${d.d}</span><span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">Sem ${d.s}</span>${status==='atrasado'?'<span class="bg-red-600 text-white px-2 py-1 rounded text-xs font-bold animate-pulse">⚠️ Atrasado</span>':''}</div><h4 class="font-bold text-gray-800 mb-2 ${d.c?'line-through opacity-60':''} break-words">${d.ma}</h4><div class="flex gap-2 text-xs flex-wrap"><span class="bg-blue-100 text-blue-700 px-2 py-1 rounded">📚 ${d.i}-${d.f}</span><span class="bg-purple-100 text-purple-700 px-2 py-1 rounded font-bold">${d.q} aulas</span></div></div>${!d.c?`<button onclick="cDia(${ix})" class="${cor.btn} text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">✅ OK</button>`:`<span class="bg-green-500 text-white px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-1 whitespace-nowrap flex-shrink-0">✓ Feito</span>`}</div><div class="mt-3 pt-3 border-t ${status==='completo'?'border-green-200':'border-gray-200'}"><label class="block text-xs font-bold text-gray-700 mb-1">📝 Títulos das aulas:</label><textarea class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none ${d.c?'bg-gray-50 opacity-60':''}" placeholder="Ex: Princípios do Direito Penal" onchange="salvarTitulo(${d.d},this.value)" ${d.c?'disabled':''}>${tit}</textarea></div></div>`}).join('')}</div></div>`}).join('')}</div>`:''}
-${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data</h2>${e.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete dias no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${e.revs.filter(x=>x.s==='p').length})</h3>${e.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${e.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-900 mb-1">📝 Títulos das aulas:</p><p class="text-sm text-blue-800 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${e.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${e.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${e.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div>${r.titulo?`<div class="bg-gray-100 rounded p-2 mt-2 text-xs text-gray-600 whitespace-pre-wrap">${r.titulo}</div>`:''}</div>`).join('')}</div></div>`:''}`}</div>`:''}
-</div>
-<div class="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-300 rounded-xl p-6">
-<h3 class="font-bold text-blue-900 mb-3 text-lg">💡 Como Funciona (Versão Nuvem ☁️)</h3>
-<div class="grid md:grid-cols-2 gap-4 text-sm text-blue-900">
-<div class="bg-white/50 rounded-lg p-3"><p class="font-bold mb-2">📋 Plano:</p><ul class="space-y-1 text-xs"><li>• ${e.cron.length} dias programados</li><li>• 4 aulas/dia, 4 dias/semana</li><li>• Anote os títulos das aulas assistidas</li><li>• Clique "✅ OK" após estudar</li><li>• 4 revisões geradas automaticamente</li></ul></div>
-<div class="bg-white/50 rounded-lg p-3"><p class="font-bold mb-2">🔄 Revisões:</p><ul class="space-y-1 text-xs"><li>• 📅 Primeira em 7 dias</li><li>• 📅 Segunda em 14 dias</li><li>• 📅 Terceira em 30 dias</li><li>• 📅 Última em 60 dias</li><li>• Os títulos aparecem nas revisões!</li></ul></div>
-</div>
-<div class="mt-4 bg-orange-50 border-2 border-orange-300 rounded-lg p-3">
-<p class="font-bold text-orange-900 mb-2">🔄 Reprogramação Automática:</p>
-<ul class="space-y-1 text-xs text-orange-800">
-<li>✅ Se você ficou atrasado, clique em "🔄 Reprogramar Atrasados"</li>
-<li>✅ O sistema ajusta automaticamente a data base</li>
-<li>✅ Todos os dias pendentes são recalculados</li>
-<li>✅ Você volta ao ritmo sem perder dias completos!</li>
-</ul>
-</div>
-<div class="mt-4 bg-green-50 border-2 border-green-300 rounded-lg p-3">
-<p class="font-bold text-green-900 mb-2">☁️ Sincronização Automática:</p>
-<ul class="space-y-1 text-xs text-green-800">
-<li>✅ Seus dados são salvos automaticamente na nuvem</li>
-<li>✅ Acesse de qualquer dispositivo com o mesmo ID</li>
-<li>✅ Atualizações em tempo real entre dispositivos</li>
-<li>✅ Clique no ID no topo para copiar/colar em outro dispositivo</li>
-</ul>
-</div>
-<p class="mt-3 text-xs text-blue-800 bg-yellow-50 border border-yellow-300 p-2 rounded"><strong>💾 Dica:</strong> Anote seu ID de usuário para usar em outros dispositivos!</p>
-</div>
-`;
-
-  // Torna as funções globais
-  window.cDia = cDia;
-  window.mkR = mkR;
-  window.editData = editData;
-  window.salvarTitulo = salvarTitulo;
-  window.exp = exp;
-  window.imp = imp;
-  window.rst = rst;
-  window.showUserId = showUserId;
-  window.reprogramarAtrasados = reprogramarAtrasados;
-  window.e = e;
-  window.rend = rend;
-}
-
-// Inicializa o app
-loadFromCloud();
+// inicia
+loadCloud();
 </script>
 </body>
 </html>
