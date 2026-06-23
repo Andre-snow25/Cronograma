@@ -174,10 +174,54 @@ function ntf(msg,tp='ok'){
   setTimeout(()=>dv.remove(),3000);
 }
 
-function dt(ds){
-  const h=new Date();
-  h.setDate(h.getDate()+ds);
-  return h.toLocaleDateString('pt-BR');
+
+
+// Helpers de data
+function parseDMY(s){const[d,m,y]=s.split('/');return new Date(+y,+m-1,+d);}
+function fmtDMY(d){return d.toLocaleDateString('pt-BR');}
+function addDias(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+
+// Acha próxima data disponível com menos de 2 revisões, a partir de 'base'
+function proximaData(base){
+  const cnt={};
+  e.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+  let d=new Date(base);
+  for(let i=0;i<365;i++){
+    const k=fmtDMY(d);
+    if((cnt[k]||0)<2) return k;
+    d=addDias(d,1);
+  }
+  return fmtDMY(base);
+}
+
+// Gera as 4 revisões respeitando máx 2/dia, a partir da data escolhida pelo usuário
+function gerarRevisoes(dsId, ma, de, ate, qtd, data1){
+  // intervalos a partir da data1 escolhida
+  const intervalos=[
+    {t:'7d',  dias:0,  cor:'amber'},
+    {t:'14d', dias:7,  cor:'orange'},
+    {t:'30d', dias:23, cor:'purple'},
+    {t:'60d', dias:53, cor:'blue'}
+  ];
+  // reconstrói contagem incluindo o que já existe
+  const cnt={};
+  e.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+
+  intervalos.forEach(({t,dias,cor})=>{
+    let d=addDias(data1,dias);
+    for(let i=0;i<365;i++){
+      const k=fmtDMY(d);
+      if((cnt[k]||0)<2){
+        cnt[k]=(cnt[k]||0)+1;
+        e.revs.push({
+          id:`${dsId}-${t}-${Math.random().toString(36).substr(2,4)}`,
+          di:dsId,ma,i:de,f:ate,q:qtd,titulo:'',dr:k,t,s:'p',cor
+        });
+        break;
+      }
+      d=addDias(d,1);
+    }
+  });
 }
 
 // Registrar aulas estudadas numa matéria
@@ -185,24 +229,34 @@ function registrarAulas(id){
   const item = e.cron.find(c=>c.id===id);
   if(!item) return;
   const restante = item.aulasTotal - item.aulasConcluidas;
+
+  // Pergunta quantas aulas estudou
   const qtdStr = prompt(`📚 ${item.ma}\n\nTotal: ${item.aulasTotal} aulas\nConcluídas: ${item.aulasConcluidas}\nRestantes: ${restante}\n\nQuantas aulas você estudou hoje?`);
-  if(qtdStr===null) return; // cancelou
+  if(qtdStr===null) return;
   const qtd = parseInt(qtdStr);
   if(!qtd || qtd<=0){ntf('❌ Quantidade inválida','er');return;}
   const real = Math.min(qtd, restante);
+
+  // Pergunta a data da 1ª revisão
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const sugestao = fmtDMY(addDias(hoje,7));
+  const dataStr = prompt(`📅 Data da 1ª revisão (dd/mm/aaaa):\n(As demais serão calculadas a partir desta data)`, sugestao);
+  if(dataStr===null) return;
+  if(!/^\d{2}\/\d{2}\/\d{4}$/.test(dataStr)){ntf('❌ Formato inválido! Use dd/mm/aaaa','er');return;}
+  const data1 = parseDMY(dataStr);
+
   const de = item.aulasConcluidas+1;
   const ate = item.aulasConcluidas+real;
   item.aulasConcluidas += real;
   if(item.aulasConcluidas>=item.aulasTotal) item.concluido=true;
   e.stats.a += real;
   e.stats.d++;
-  // Gera registro no histórico (dias)
+
   const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:''};
   e.dias.push(ds);
-  // Gera revisões
-  [{t:'7d',ds:7,cor:'amber'},{t:'14d',ds:14,cor:'orange'},{t:'30d',ds:30,cor:'purple'},{t:'60d',ds:60,cor:'blue'}].forEach(r=>{
-    e.revs.push({id:`${ds.id}-${r.t}`,di:ds.id,ma:item.ma,i:de,f:ate,q:real,titulo:'',dr:dt(r.ds),t:r.t,s:'p',cor:r.cor});
-  });
+
+  gerarRevisoes(ds.id, item.ma, de, ate, real, data1);
+
   sv();rend();
   ntf(`🎉 +${real} aulas em ${item.ma}!`);
 }
