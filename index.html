@@ -10,275 +10,290 @@
   body { font-family: 'Inter', system-ui, sans-serif; }
   .tab-active { border-bottom: 3px solid #6366f1; color: #6366f1; font-weight: 700; }
   .fade { animation: fadeIn .25s ease; }
-  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  .sync-pulse { animation: syncPulse 1.8s infinite; }
-  @keyframes syncPulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  .pulse { animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
-  textarea { resize:vertical; min-height:52px; }
   .card { transition: box-shadow .15s, transform .15s; }
-  .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.08); transform: translateY(-1px); }
-  details > summary { list-style: none; cursor: pointer; }
-  details > summary::-webkit-details-marker { display: none; }
-  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:100; display:flex; align-items:center; justify-content:center; }
-  .modal-box { background:#fff; border-radius:16px; padding:28px; max-width:420px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,.25); }
-  ::-webkit-scrollbar { width:6px; height:6px; }
-  ::-webkit-scrollbar-track { background:#f1f5f9; }
-  ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+  .card:hover { box-shadow:0 4px 20px rgba(0,0,0,.08); transform:translateY(-1px); }
+  details > summary { list-style:none; cursor:pointer; }
+  details > summary::-webkit-details-marker { display:none; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; display:flex; align-items:center; justify-content:center; }
+  .modal-box { background:#fff; border-radius:16px; padding:28px; max-width:420px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+  textarea { resize:vertical; min-height:52px; }
 </style>
 </head>
 <body class="bg-slate-100 min-h-screen">
 
-<!-- Notificações -->
-<div id="notifs" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
-<!-- Status sync -->
-<div id="sync-status" class="fixed top-4 left-4 z-50"></div>
-<!-- Modal -->
-<div id="modal" class="modal-overlay hidden"></div>
-
+<div id="notifs" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+<div id="sync-bar" class="fixed top-4 left-4 z-50"></div>
+<div id="modal-root"></div>
 <div id="app" class="max-w-5xl mx-auto px-4 py-6"></div>
 
-<script type="module">
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+<!-- Firebase via CDN clássico (não module) para evitar escopo isolado -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
-const FB = {
-  apiKey:"AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
-  authDomain:"cronograma-d352c.firebaseapp.com",
-  projectId:"cronograma-d352c",
-  storageBucket:"cronograma-d352c.firebasestorage.app",
-  messagingSenderId:"1035295977614",
-  appId:"1:1035295977614:web:e4ef9bfd959470f0b759df"
-};
-const fbApp = initializeApp(FB);
-const db = getFirestore(fbApp);
+<script>
+// ═══════════════════════════════════════════════════════
+// FIREBASE
+// ═══════════════════════════════════════════════════════
+firebase.initializeApp({
+  apiKey: "AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
+  authDomain: "cronograma-d352c.firebaseapp.com",
+  projectId: "cronograma-d352c",
+  storageBucket: "cronograma-d352c.firebasestorage.app",
+  messagingSenderId: "1035295977614",
+  appId: "1:1035295977614:web:e4ef9bfd959470f0b759df"
+});
+const db = firebase.firestore();
 
-// Sempre lê o userId mais recente do localStorage no momento do carregamento
+// ═══════════════════════════════════════════════════════
+// USERID
+// ═══════════════════════════════════════════════════════
 let userId = localStorage.getItem('userId');
 if (!userId) {
-  userId = 'u_' + Math.random().toString(36).substr(2,9);
+  userId = 'u_' + Math.random().toString(36).substr(2, 9);
   localStorage.setItem('userId', userId);
 }
-console.log('Carregando com userId:', userId);
 
-// ─── Materiais ────────────────────────────────────────────────────────────────
-const MAT_ORIG = {
-  'Direito Penal – Parte Geral':53,
-  'Direito Penal – Parte Especial':151,
-  'Direito Processual Penal':53,
-  'Legislação Penal Especial':168,
-  'Direito Constitucional':45,
-  'Criminologia':52,
-  'Princípios Constitucionais':30,
-  'Direitos Humanos':48,
-  'Controle de Constitucionalidade':25,
-  'Direito Penal Militar':35,
-  'Execução Penal':40,
-  'Tribunal do Júri':28,
-  'Lei de Drogas':20,
-  'Português':81,
-  'Raciocínio Lógico':101,
-  'Raciocínio Lógico (Matemático)':80,
-  'Informática':160,
-  'Informática (Teoria e Exercícios)':70,
-  'Matemática':90
+// ═══════════════════════════════════════════════════════
+// MATERIAIS
+// ═══════════════════════════════════════════════════════
+const MATERIAIS = {
+  'Direito Penal – Parte Geral': 53,
+  'Direito Penal – Parte Especial': 151,
+  'Direito Processual Penal': 53,
+  'Legislação Penal Especial': 168,
+  'Direito Constitucional': 45,
+  'Criminologia': 52,
+  'Princípios Constitucionais': 30,
+  'Direitos Humanos': 48,
+  'Controle de Constitucionalidade': 25,
+  'Direito Penal Militar': 35,
+  'Execução Penal': 40,
+  'Tribunal do Júri': 28,
+  'Lei de Drogas': 20,
+  'Português': 81,
+  'Raciocínio Lógico': 101,
+  'Raciocínio Lógico (Matemático)': 80,
+  'Informática': 160,
+  'Informática (Teoria e Exercícios)': 70,
+  'Matemática': 90
 };
 
-// ─── Estado ───────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// ESTADO
+// ═══════════════════════════════════════════════════════
 let E = {
   aba: 'plano',
-  // cron: [{ id, ma, aulasTotal, aulasConcluidas, concluido, notas, deletado }]
-  cron: [],
-  // sessoes: [{ id, dt, cronId, ma, de, ate, qtd, notas }]
-  sessoes: [],
-  // revs: [{ id, sessaoId, ma, de, ate, qtd, notas, dr (dd/mm/yyyy), tipo(7d/14d/30d/60d), status(p/c) }]
-  revs: [],
+  cron: [],      // [{id, ma, aulasTotal, aulasConcluidas, concluido, deletado}]
+  sessoes: [],   // [{id, dt, cronId, ma, de, ate, qtd, notas}]
+  revs: [],      // [{id, sessaoId, ma, de, ate, qtd, notas, dr, tipo, status}]
   stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
   lastUpdated: ''
 };
-let isLoading = true;
 
-// ─── Helpers de data ──────────────────────────────────────────────────────────
+let unsubRealtime = null;
+let salvando = false;
+
+// ═══════════════════════════════════════════════════════
+// UTILITÁRIOS DE DATA
+// ═══════════════════════════════════════════════════════
 function hoje() {
   const d = new Date(); d.setHours(0,0,0,0); return d;
 }
 function parseDMY(s) {
-  const [d,m,y] = s.split('/'); return new Date(+y, +m-1, +d);
+  const p = s.split('/');
+  return new Date(+p[2], +p[1]-1, +p[0]);
 }
 function fmtDMY(d) {
-  return d.toLocaleDateString('pt-BR');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
 }
 function addDays(d, n) {
-  const r = new Date(d); r.setDate(r.getDate()+n); return r;
+  const r = new Date(d); r.setDate(r.getDate() + n); return r;
 }
-function cmpDMY(a, b) {
-  return parseDMY(a) - parseDMY(b);
+function cmpDMY(a, b) { return parseDMY(a) - parseDMY(b); }
+
+// ═══════════════════════════════════════════════════════
+// NOTIFICAÇÕES
+// ═══════════════════════════════════════════════════════
+function ntf(msg, tp='ok') {
+  const cores = {ok:'bg-emerald-500', er:'bg-red-500', warn:'bg-amber-500', info:'bg-blue-500'};
+  const el = document.createElement('div');
+  el.className = `${cores[tp]||cores.ok} text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium fade pointer-events-auto`;
+  el.textContent = msg;
+  document.getElementById('notifs').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
 }
 
-// ─── Sync nuvem ───────────────────────────────────────────────────────────────
-function showSync(msg, tp='info') {
-  const col = {info:'bg-blue-500',success:'bg-emerald-500',error:'bg-red-500',syncing:'bg-amber-500'};
-  const ic  = {info:'☁️',success:'✅',error:'❌',syncing:'🔄'};
-  document.getElementById('sync-status').innerHTML = `
-    <div class="${col[tp]} text-white px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium ${tp==='syncing'?'sync-pulse':''}">
+function syncBar(msg, tp='info') {
+  const cores = {info:'bg-blue-500', ok:'bg-emerald-500', er:'bg-red-500', load:'bg-amber-500'};
+  const ic = {info:'☁️', ok:'✅', er:'❌', load:'🔄'};
+  document.getElementById('sync-bar').innerHTML = `
+    <div class="${cores[tp]} text-white px-4 py-2 rounded-xl shadow text-sm font-medium flex items-center gap-2 ${tp==='load'?'pulse':''}">
       ${ic[tp]} ${msg}
     </div>`;
-  if (tp !== 'syncing') setTimeout(()=>{ document.getElementById('sync-status').innerHTML=''; }, 2800);
+  if (tp !== 'load') setTimeout(() => { document.getElementById('sync-bar').innerHTML = ''; }, 3000);
 }
 
-async function saveCloud() {
+// ═══════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════
+function abrirModal(html, onOk) {
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal-box fade">${html}</div></div>`;
+  const overlay = document.getElementById('modal-overlay');
+  const btnOk  = root.querySelector('#btn-ok');
+  const btnCnl = root.querySelector('#btn-cancel');
+  if (btnOk)  btnOk.onclick  = () => { fecharModal(); if (onOk) onOk(); };
+  if (btnCnl) btnCnl.onclick = fecharModal;
+  overlay.onclick = (e) => { if (e.target === overlay) fecharModal(); };
+}
+function fecharModal() {
+  document.getElementById('modal-root').innerHTML = '';
+}
+
+// ═══════════════════════════════════════════════════════
+// FIREBASE: SALVAR / CARREGAR
+// ═══════════════════════════════════════════════════════
+async function salvar() {
+  if (salvando) return;
+  salvando = true;
   try {
-    showSync('Sincronizando...','syncing');
     E.lastUpdated = new Date().toISOString();
-    await setDoc(doc(db,'cronogramas',userId), E);
-    showSync('Salvo na nuvem!','success');
+    await db.collection('cronogramas').doc(userId).set(E);
+    syncBar('Salvo!', 'ok');
+    try { localStorage.setItem('cron4', JSON.stringify(E)); } catch {}
   } catch(err) {
-    console.error(err); showSync('Erro ao sincronizar','error');
+    console.error('Erro ao salvar:', err);
+    syncBar('Erro ao salvar', 'er');
+    // salva local como fallback
+    try { localStorage.setItem('cron4', JSON.stringify(E)); } catch {}
+  } finally {
+    salvando = false;
   }
-  try { localStorage.setItem('cron3', JSON.stringify(E)); } catch {}
 }
 
-async function loadCloud() {
-  isLoading = true;
+async function carregar() {
+  syncBar('Carregando...', 'load');
   document.getElementById('app').innerHTML = `
     <div class="flex flex-col items-center justify-center min-h-[60vh] text-slate-400">
-      <div class="text-5xl mb-4 sync-pulse">☁️</div>
-      <p class="text-lg font-semibold">Carregando cronograma...</p>
-      <p class="text-sm mt-2">ID: ${userId}</p>
+      <div class="text-5xl mb-4 pulse">☁️</div>
+      <p class="text-lg font-semibold">Carregando...</p>
+      <p class="text-xs mt-2 font-mono">${userId}</p>
     </div>`;
+
   try {
-    showSync('Carregando...','syncing');
-    // timeout de segurança: se demorar mais de 8s, cai no fallback
-    const snap = await Promise.race([
-      getDoc(doc(db,'cronogramas',userId)),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
-    ]);
-    if (snap.exists()) {
-      const d = snap.data();
-      E = { ...E, ...d };
-      migrate();
-      showSync('Carregado!','success');
+    const snap = await db.collection('cronogramas').doc(userId).get();
+    if (snap.exists) {
+      E = snap.data();
+      garantirCampos();
+      syncBar('Carregado!', 'ok');
     } else {
-      E = {
-        aba: 'plano', cron: [], sessoes: [], revs: [],
-        stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
-        lastUpdated: ''
-      };
-      genCron();
-      showSync('Novo cronograma criado!','success');
-      await saveCloud();
+      // Primeiro acesso com este ID
+      resetarEstado();
+      gerarCronograma();
+      await salvar();
+      syncBar('Novo cronograma criado!', 'ok');
     }
   } catch(err) {
-    console.error('loadCloud erro:', err);
-    showSync('Erro ao carregar — usando dados locais','error');
-    try { const s=localStorage.getItem('cron3'); if(s) E={...E,...JSON.parse(s)}; } catch {}
-    migrate();
-    if (!E.cron.length) genCron();
-  } finally {
-    isLoading = false;
-    render();
-    setupRealtime();
+    console.error('Erro ao carregar:', err);
+    syncBar('Offline — carregando local', 'warn');
+    const local = localStorage.getItem('cron4');
+    if (local) {
+      try { E = JSON.parse(local); garantirCampos(); } catch { resetarEstado(); gerarCronograma(); }
+    } else {
+      resetarEstado();
+      gerarCronograma();
+    }
   }
+
+  render();
+  iniciarRealtime();
 }
 
-let unsubRealtime = null;
-function setupRealtime() {
+function iniciarRealtime() {
   if (unsubRealtime) { unsubRealtime(); unsubRealtime = null; }
-  unsubRealtime = onSnapshot(doc(db,'cronogramas',userId), snap => {
-    if (snap.exists() && !isLoading) {
+  unsubRealtime = db.collection('cronogramas').doc(userId).onSnapshot(snap => {
+    if (snap.exists) {
       const d = snap.data();
-      if ((d.lastUpdated||'') > (E.lastUpdated||'')) {
-        E = { ...E, ...d };
+      if (d.lastUpdated && d.lastUpdated > (E.lastUpdated || '')) {
+        E = d;
+        garantirCampos();
         render();
-        ntf('🔄 Atualizado de outro dispositivo!');
+        ntf('🔄 Sincronizado de outro dispositivo!');
       }
     }
+  }, err => console.error('Realtime erro:', err));
+}
+
+// ═══════════════════════════════════════════════════════
+// ESTADO: HELPERS
+// ═══════════════════════════════════════════════════════
+function resetarEstado() {
+  E = {
+    aba: 'plano',
+    cron: [], sessoes: [], revs: [],
+    stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
+    lastUpdated: ''
+  };
+}
+
+function garantirCampos() {
+  if (!E.cron)    E.cron    = [];
+  if (!E.sessoes) E.sessoes = [];
+  if (!E.revs)    E.revs    = [];
+  if (!E.stats)   E.stats   = { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 };
+  if (!E.stats.aulasFeitas) E.stats.aulasFeitas = 0;
+  if (!E.stats.sessoes)     E.stats.sessoes     = 0;
+  if (!E.stats.revsFeitas)  E.stats.revsFeitas  = 0;
+  E.cron.forEach(c => {
+    if (c.deletado === undefined) c.deletado = false;
+    if (c.aulasConcluidas === undefined) c.aulasConcluidas = 0;
+    if (c.concluido === undefined) c.concluido = false;
   });
 }
 
-// migração de dados antigos
-function migrate() {
-  if (!E.cron) E.cron = [];
-  if (!E.sessoes) E.sessoes = [];
-  if (!E.revs) E.revs = [];
-  if (!E.stats) E.stats = { aulasFeitas:0, sessoes:0, revsFeitas:0 };
-  // campo deletado
-  E.cron.forEach(c => { if (c.deletado === undefined) c.deletado = false; });
-}
-
-// ─── Gerar cronograma inicial ─────────────────────────────────────────────────
-function genCron() {
-  E.cron = Object.entries(MAT_ORIG).map(([ma, total], i) => ({
+function gerarCronograma() {
+  E.cron = Object.entries(MATERIAIS).map(([ma, total], i) => ({
     id: 'c' + i,
     ma,
     aulasTotal: total,
     aulasConcluidas: 0,
     concluido: false,
-    notas: '',
     deletado: false
   }));
 }
 
-// ─── Notificações ─────────────────────────────────────────────────────────────
-function ntf(msg, tp='ok') {
-  const col = {ok:'bg-emerald-500',er:'bg-red-500',warn:'bg-amber-500',info:'bg-blue-500'};
-  const el = document.createElement('div');
-  el.className = `${col[tp]} text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium fade`;
-  el.textContent = msg;
-  document.getElementById('notifs').appendChild(el);
-  setTimeout(()=>el.remove(), 3200);
-}
+// ═══════════════════════════════════════════════════════
+// REVISÕES
+// ═══════════════════════════════════════════════════════
+function gerarRevisoes(sessao, data1) {
+  // Conta revisões pendentes por data
+  const cnt = {};
+  E.revs.filter(r => r.status === 'p').forEach(r => { cnt[r.dr] = (cnt[r.dr] || 0) + 1; });
 
-// ─── Modal genérico ───────────────────────────────────────────────────────────
-function openModal(html, onConfirm) {
-  const m = document.getElementById('modal');
-  m.classList.remove('hidden');
-  m.innerHTML = `<div class="modal-box fade">${html}</div>`;
-  if (onConfirm) {
-    m.querySelector('#modal-confirm')?.addEventListener('click', ()=>{ closeModal(); onConfirm(); });
-  }
-  m.querySelector('#modal-cancel')?.addEventListener('click', closeModal);
-}
-function closeModal() {
-  document.getElementById('modal').classList.add('hidden');
-  document.getElementById('modal').innerHTML = '';
-}
-
-// ─── Revisões: distribuição (máx 2/dia) ──────────────────────────────────────
-function proximaDataDisponivel(dataBase) {
-  // conta revisões por data
-  const contagem = {};
-  E.revs.filter(r=>r.status==='p').forEach(r=>{ contagem[r.dr] = (contagem[r.dr]||0)+1; });
-
-  let d = new Date(dataBase);
-  for (let i=0; i<365; i++) {
-    const k = fmtDMY(d);
-    if ((contagem[k]||0) < 2) return k;
-    d = addDays(d, 1);
-  }
-  return fmtDMY(dataBase);
-}
-
-function gerarRevisoes(sessao, data1rev) {
-  // data1rev: Date
+  // Intervalos a partir da data1 escolhida pelo usuário
   const intervalos = [
-    { tipo:'7d',  dias:0 },   // data1 escolhida pelo usuário
-    { tipo:'14d', dias:7 },
-    { tipo:'30d', dias:23 },
-    { tipo:'60d', dias:53 }
+    { tipo: '1ª (7d)',  dias: 0  },
+    { tipo: '2ª (14d)', dias: 7  },
+    { tipo: '3ª (30d)', dias: 23 },
+    { tipo: '4ª (60d)', dias: 53 }
   ];
-  const contagem = {};
-  E.revs.filter(r=>r.status==='p').forEach(r=>{ contagem[r.dr]=(contagem[r.dr]||0)+1; });
 
-  let base = new Date(data1rev);
-  intervalos.forEach(({tipo, dias}) => {
-    let d = addDays(base, dias);
-    // empurra se já tem 2 revisões
-    for (let i=0; i<365; i++) {
+  intervalos.forEach(({ tipo, dias }) => {
+    let d = addDays(data1, dias);
+    // Empurra até achar dia com menos de 2 revisões
+    for (let i = 0; i < 365; i++) {
       const k = fmtDMY(d);
-      if ((contagem[k]||0) < 2) {
-        contagem[k] = (contagem[k]||0)+1;
+      if ((cnt[k] || 0) < 2) {
+        cnt[k] = (cnt[k] || 0) + 1;
         E.revs.push({
-          id: `r${Date.now()}_${tipo}_${Math.random().toString(36).substr(2,4)}`,
+          id: 'r' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
           sessaoId: sessao.id,
           ma: sessao.ma,
           de: sessao.de,
@@ -296,78 +311,73 @@ function gerarRevisoes(sessao, data1rev) {
   });
 }
 
-// ─── Reorganizar atrasos ──────────────────────────────────────────────────────
 function reorganizarAtrasos() {
   const hj = hoje();
-  const hjStr = fmtDMY(hj);
+  const atrasadas = E.revs.filter(r => r.status === 'p' && parseDMY(r.dr) < hj);
+  if (!atrasadas.length) { ntf('✅ Nenhum atraso!'); return; }
 
-  // Pega revisões pendentes atrasadas e as redistribui a partir de hoje
-  const pendAtrasadas = E.revs
-    .filter(r => r.status === 'p' && parseDMY(r.dr) < hj)
-    .sort((a,b) => cmpDMY(a.dr, b.dr));
+  const cnt = {};
+  E.revs.filter(r => r.status === 'p' && parseDMY(r.dr) >= hj)
+        .forEach(r => { cnt[r.dr] = (cnt[r.dr] || 0) + 1; });
 
-  if (!pendAtrasadas.length) { ntf('✅ Nenhum atraso encontrado!'); return; }
-
-  // Limpa as datas atrasadas e redistribui
-  const contagem = {};
-  E.revs.filter(r=>r.status==='p' && parseDMY(r.dr)>=hj).forEach(r=>{
-    contagem[r.dr]=(contagem[r.dr]||0)+1;
-  });
-
-  pendAtrasadas.forEach(r => {
+  atrasadas.sort((a,b) => cmpDMY(a.dr, b.dr)).forEach(r => {
     let d = new Date(hj);
-    for (let i=0; i<365; i++) {
+    for (let i = 0; i < 365; i++) {
       const k = fmtDMY(d);
-      if ((contagem[k]||0) < 2) {
-        contagem[k]=(contagem[k]||0)+1;
-        r.dr = k;
-        break;
-      }
-      d = addDays(d,1);
+      if ((cnt[k] || 0) < 2) { cnt[k] = (cnt[k]||0)+1; r.dr = k; break; }
+      d = addDays(d, 1);
     }
   });
 
-  saveCloud(); render();
-  ntf(`🔄 ${pendAtrasadas.length} revisão(ões) redistribuída(s)!`);
+  salvar(); render();
+  ntf(`🔄 ${atrasadas.length} revisão(ões) redistribuída(s)!`);
 }
 
-// ─── Ações principais ─────────────────────────────────────────────────────────
-function abrirModalConcluir(cronId) {
-  const item = E.cron.find(c=>c.id===cronId);
+// ═══════════════════════════════════════════════════════
+// AÇÕES
+// ═══════════════════════════════════════════════════════
+function abrirModalEstudo(cronId) {
+  const item = E.cron.find(c => c.id === cronId);
   if (!item) return;
   const restante = item.aulasTotal - item.aulasConcluidas;
+  const data1padrao = fmtDMY(addDays(hoje(), 7));
+  // Converte para yyyy-mm-dd para o input type=date
+  const [dd,mm,yy] = data1padrao.split('/');
+  const data1input = `${yy}-${mm}-${dd}`;
 
-  const html = `
-    <h3 class="text-lg font-bold mb-4">✅ Registrar estudo</h3>
-    <p class="text-sm text-gray-600 mb-1 font-semibold">${item.ma}</p>
-    <p class="text-xs text-gray-400 mb-4">${item.aulasConcluidas} de ${item.aulasTotal} aulas concluídas • ${restante} restantes</p>
+  abrirModal(`
+    <h3 class="text-lg font-bold mb-1">✅ Registrar estudo</h3>
+    <p class="text-sm font-semibold text-slate-700 mb-1">${item.ma}</p>
+    <p class="text-xs text-slate-400 mb-4">${item.aulasConcluidas}/${item.aulasTotal} aulas concluídas · ${restante} restantes</p>
 
     <label class="block text-sm font-semibold mb-1">Quantas aulas você estudou?</label>
-    <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
+    <input id="inp-qtd" type="number" min="1" max="${restante}" value="1"
+      class="w-full border-2 border-slate-200 rounded-lg p-3 mb-4 text-center text-2xl font-bold focus:border-indigo-500 focus:outline-none">
 
     <label class="block text-sm font-semibold mb-1">📅 Data da 1ª revisão</label>
-    <input id="m-data1rev" type="date"
-      value="${new Date(Date.now()+7*864e5).toISOString().split('T')[0]}"
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 focus:border-indigo-500 focus:outline-none">
+    <input id="inp-data1" type="date" value="${data1input}"
+      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-4 focus:border-indigo-500 focus:outline-none">
 
     <label class="block text-sm font-semibold mb-1">📝 Anotações (opcional)</label>
-    <textarea id="m-notas" placeholder="Títulos das aulas, pontos importantes..." class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none text-sm"></textarea>
+    <textarea id="inp-notas" placeholder="Títulos das aulas, pontos importantes..."
+      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none"></textarea>
 
     <div class="flex gap-3">
-      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-      <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
-    </div>`;
+      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold hover:bg-slate-50">Cancelar</button>
+      <button id="btn-ok" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
+    </div>`,
+  () => {
+    const qtd = Math.max(1, Math.min(restante, parseInt(document.getElementById('inp-qtd').value) || 1));
+    const dataStr = document.getElementById('inp-data1').value;
+    const notas   = document.getElementById('inp-notas').value.trim();
 
-  openModal(html, () => {
-    const qtd = Math.max(1, Math.min(restante, parseInt(document.getElementById('m-qtd').value)||1));
-    const data1str = document.getElementById('m-data1rev').value;
-    const notas = document.getElementById('m-notas').value.trim();
+    if (!dataStr) { ntf('Informe a data da 1ª revisão', 'er'); return; }
 
-    if (!data1str) { ntf('Informe a data da 1ª revisão','er'); return; }
-    const data1 = new Date(data1str + 'T12:00:00');
+    // Converte yyyy-mm-dd → Date
+    const [y,m,d] = dataStr.split('-');
+    const data1 = new Date(+y, +m-1, +d);
 
-    const de = item.aulasConcluidas + 1;
+    const de  = item.aulasConcluidas + 1;
     const ate = item.aulasConcluidas + qtd;
 
     const sessao = {
@@ -377,6 +387,7 @@ function abrirModalConcluir(cronId) {
       ma: item.ma,
       de, ate, qtd, notas
     };
+
     E.sessoes.push(sessao);
     item.aulasConcluidas += qtd;
     if (item.aulasConcluidas >= item.aulasTotal) item.concluido = true;
@@ -384,67 +395,115 @@ function abrirModalConcluir(cronId) {
     E.stats.sessoes++;
 
     gerarRevisoes(sessao, data1);
-    saveCloud(); render();
-    ntf(`🎉 +${qtd} aula(s) registrada(s) em ${item.ma}!`);
+    salvar();
+    render();
+    ntf(`🎉 +${qtd} aula(s) registrada(s)!`);
   });
 }
 
-function confirmarExcluir(cronId) {
-  const item = E.cron.find(c=>c.id===cronId);
+function abrirModalExcluir(cronId) {
+  const item = E.cron.find(c => c.id === cronId);
   if (!item) return;
-  const html = `
+  abrirModal(`
     <h3 class="text-lg font-bold mb-3">🗑️ Excluir matéria</h3>
-    <p class="text-sm text-gray-600 mb-5">Tem certeza que deseja remover <strong>${item.ma}</strong> do cronograma? Esta ação não pode ser desfeita.</p>
+    <p class="text-sm text-slate-600 mb-5">Remover <strong>${item.ma}</strong> do cronograma?</p>
     <div class="flex gap-3">
-      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-      <button id="modal-confirm" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold hover:bg-red-600">Excluir</button>
-    </div>`;
-  openModal(html, () => {
-    item.deletado = true;
-    saveCloud(); render();
-    ntf('🗑️ Matéria removida do cronograma');
-  });
+      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button id="btn-ok" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold hover:bg-red-600">Excluir</button>
+    </div>`,
+  () => { item.deletado = true; salvar(); render(); ntf('🗑️ Matéria removida'); });
 }
 
 function marcarRevisao(revId) {
-  const r = E.revs.find(x=>x.id===revId);
+  const r = E.revs.find(x => x.id === revId);
   if (!r) return;
   r.status = 'c';
   E.stats.revsFeitas++;
-  saveCloud(); render();
+  salvar(); render();
   ntf('✅ Revisão concluída!');
 }
 
-function editarDataRev(revId) {
-  const r = E.revs.find(x=>x.id===revId);
+function abrirModalEditarData(revId) {
+  const r = E.revs.find(x => x.id === revId);
   if (!r) return;
-  // converter dd/mm/yyyy → yyyy-mm-dd para input date
-  const [d,m,y] = r.dr.split('/');
-  const html = `
-    <h3 class="text-lg font-bold mb-4">📅 Alterar data da revisão</h3>
-    <p class="text-sm text-gray-500 mb-4">${r.ma} · ${r.tipo}</p>
-    <input id="m-novaData" type="date" value="${y}-${m}-${d}"
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none">
+  const [dd,mm,yy] = r.dr.split('/');
+  abrirModal(`
+    <h3 class="text-lg font-bold mb-2">📅 Alterar data</h3>
+    <p class="text-sm text-slate-500 mb-4">${r.ma} · ${r.tipo}</p>
+    <input id="inp-novaData" type="date" value="${yy}-${mm}-${dd}"
+      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none">
     <div class="flex gap-3">
-      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Salvar</button>
-    </div>`;
-  openModal(html, () => {
-    const v = document.getElementById('m-novaData').value;
+      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button id="btn-ok" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Salvar</button>
+    </div>`,
+  () => {
+    const v = document.getElementById('inp-novaData').value;
     if (!v) return;
-    const [yy,mm,dd] = v.split('-');
-    r.dr = `${dd}/${mm}/${yy}`;
-    saveCloud(); render();
+    const [y2,m2,d2] = v.split('-');
+    r.dr = `${d2}/${m2}/${y2}`;
+    salvar(); render();
     ntf('📅 Data atualizada!');
   });
 }
 
+function abrirModalId() {
+  abrirModal(`
+    <h3 class="text-lg font-bold mb-2">🆔 ID de usuário</h3>
+    <p class="text-sm text-slate-500 mb-2">Use este ID em outro dispositivo para acessar seus dados.</p>
+    <div class="bg-slate-100 border-2 border-slate-200 rounded-lg p-3 font-mono text-xs break-all select-all mb-4">${userId}</div>
+    <hr class="mb-4 border-slate-200">
+    <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
+    <input id="inp-novo-id" type="text" placeholder="Cole o ID aqui..."
+      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none">
+    <div class="flex gap-3">
+      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Fechar</button>
+      <button id="btn-ok" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
+    </div>`,
+  () => {
+    const novo = document.getElementById('inp-novo-id').value.trim();
+    if (!novo) { ntf('Digite um ID', 'er'); return; }
+    if (novo === userId) { ntf('Já está usando este ID', 'warn'); return; }
+
+    // Para o listener atual
+    if (unsubRealtime) { unsubRealtime(); unsubRealtime = null; }
+
+    // Atualiza userId globalmente e no localStorage
+    userId = novo;
+    localStorage.setItem('userId', novo);
+    localStorage.removeItem('cron4');
+
+    // Reseta estado e carrega do novo ID
+    resetarEstado();
+    ntf('🔄 Trocando ID...', 'info');
+    carregar();
+  });
+}
+
+function abrirModalReset() {
+  abrirModal(`
+    <h3 class="text-lg font-bold mb-3">⚠️ Resetar tudo</h3>
+    <p class="text-sm text-slate-600 mb-5">Apaga <strong>todo o progresso</strong> da nuvem e localmente. Não pode ser desfeito.</p>
+    <div class="flex gap-3">
+      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button id="btn-ok" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold">Resetar</button>
+    </div>`,
+  () => {
+    resetarEstado();
+    gerarCronograma();
+    localStorage.removeItem('cron4');
+    salvar(); render();
+    ntf('🔄 Cronograma resetado!');
+  });
+}
+
 function exportar() {
-  const b = new Blob([JSON.stringify(E,null,2)],{type:'application/json'});
+  const b = new Blob([JSON.stringify(E, null, 2)], { type: 'application/json' });
   const u = URL.createObjectURL(b);
-  const a = document.createElement('a'); a.href=u;
+  const a = document.createElement('a');
+  a.href = u;
   a.download = `backup-pcsp-${new Date().toISOString().split('T')[0]}.json`;
-  a.click(); URL.revokeObjectURL(u);
+  a.click();
+  URL.revokeObjectURL(u);
   ntf('💾 Exportado!');
 }
 
@@ -453,79 +512,45 @@ function importar(ev) {
   const r = new FileReader();
   r.onload = x => {
     try {
-      E = {...E,...JSON.parse(x.target.result)};
-      migrate(); saveCloud(); render(); ntf('📥 Importado!');
-    } catch { ntf('❌ Arquivo inválido','er'); }
+      E = JSON.parse(x.target.result);
+      garantirCampos();
+      salvar(); render();
+      ntf('📥 Importado!');
+    } catch { ntf('❌ Arquivo inválido', 'er'); }
   };
   r.readAsText(f);
 }
 
-function resetar() {
-  const html = `
-    <h3 class="text-lg font-bold mb-3">⚠️ Resetar tudo</h3>
-    <p class="text-sm text-gray-600 mb-5">Isso apagará <strong>todo o progresso</strong>, inclusive na nuvem. Não pode ser desfeito.</p>
-    <div class="flex gap-3">
-      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button id="modal-confirm" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold">Resetar</button>
-    </div>`;
-  openModal(html, () => { localStorage.removeItem('cron3'); location.reload(); });
-}
-
-function mostrarId() {
-  const idAtual = userId;
-  const html = `
-    <h3 class="text-lg font-bold mb-3">🆔 Seu ID de usuário</h3>
-    <p class="text-sm text-gray-500 mb-2">Copie este ID para usar em outro dispositivo.</p>
-    <div class="bg-slate-100 rounded-lg p-3 font-mono text-xs break-all mb-1 select-all border-2 border-slate-200">${idAtual}</div>
-    <p class="text-xs text-slate-400 mb-4">Selecione e copie (Ctrl+C / Cmd+C)</p>
-    <hr class="mb-4">
-    <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
-    <input id="m-novoId" placeholder="Cole o ID aqui..." class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none text-sm">
-    <div class="flex gap-3">
-      <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Fechar</button>
-      <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
-    </div>`;
-  openModal(html, () => {
-    const nv = document.getElementById('m-novoId').value.trim();
-    if (!nv) { ntf('Digite um ID válido', 'er'); return; }
-    if (nv === userId) { ntf('Já está usando este ID', 'warn'); return; }
-    // Grava o novo ID no localStorage e apaga cache ANTES do reload
-    localStorage.setItem('userId', nv);
-    localStorage.removeItem('cron3');
-    // Força reload ignorando cache do browser
-    location.reload(true);
-  });
-}
-
-// ─── Render ───────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// RENDER PRINCIPAL
+// ═══════════════════════════════════════════════════════
 function render() {
   const hj = hoje();
-  const totalAulas = E.cron.filter(c=>!c.deletado).reduce((s,c)=>s+c.aulasTotal,0);
-  const pg = totalAulas ? (E.stats.aulasFeitas/totalAulas*100).toFixed(1) : '0.0';
-  const revsPend = E.revs.filter(r=>r.status==='p').length;
-  const temAtrasados = E.revs.some(r=>r.status==='p' && parseDMY(r.dr)<hj);
-
-  const ativas = E.cron.filter(c=>!c.deletado && !c.concluido);
-  const concluidas = E.cron.filter(c=>!c.deletado && c.concluido);
+  const totalAulas = E.cron.filter(c => !c.deletado).reduce((s,c) => s + c.aulasTotal, 0);
+  const pg = totalAulas ? (E.stats.aulasFeitas / totalAulas * 100).toFixed(1) : '0.0';
+  const revsPend = E.revs.filter(r => r.status === 'p').length;
+  const temAtrasados = E.revs.some(r => r.status === 'p' && parseDMY(r.dr) < hj);
+  const ativas = E.cron.filter(c => !c.deletado && !c.concluido);
+  const concluidas = E.cron.filter(c => !c.deletado && c.concluido);
 
   document.getElementById('app').innerHTML = `
 <div class="fade">
-  <!-- Cabeçalho -->
   <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-5">
     <div class="flex justify-between items-start gap-4 flex-wrap mb-5">
       <div>
         <h1 class="text-2xl font-extrabold text-slate-800">📚 Cronograma PC SP 2026</h1>
-        <p class="text-slate-500 text-sm mt-1">Revisão espaçada · Sincronização em nuvem ☁️</p>
-        <button onclick="mostrarId()" class="text-xs text-indigo-500 hover:underline mt-1">🆔 ${userId.substr(0,14)}...</button>
+        <p class="text-slate-500 text-sm mt-1">Revisão espaçada · Nuvem ☁️</p>
+        <button onclick="abrirModalId()" class="text-xs text-indigo-500 hover:underline mt-1">🆔 ${userId.substr(0,16)}...</button>
       </div>
       <div class="flex gap-2 flex-wrap">
         ${temAtrasados ? `<button onclick="reorganizarAtrasos()" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow">⚡ Reorganizar atrasos</button>` : ''}
         <button onclick="exportar()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">💾 Exportar</button>
-        <label class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="importar(event)" class="hidden"></label>
-        <button onclick="resetar()" class="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium">🔄 Resetar</button>
+        <label class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer">📥 Importar
+          <input type="file" accept=".json" onchange="importar(event)" class="hidden">
+        </label>
+        <button onclick="abrirModalReset()" class="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium">🔄 Resetar</button>
       </div>
     </div>
-    <!-- Stats -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="bg-indigo-50 rounded-xl p-4">
         <p class="text-xs font-bold text-indigo-500 uppercase tracking-wide mb-1">Aulas feitas</p>
@@ -535,69 +560,60 @@ function render() {
       <div class="bg-emerald-50 rounded-xl p-4">
         <p class="text-xs font-bold text-emerald-500 uppercase tracking-wide mb-1">Progresso</p>
         <p class="text-3xl font-extrabold text-emerald-700">${pg}%</p>
-        <div class="mt-2 bg-emerald-200 rounded-full h-1.5"><div class="bg-emerald-500 h-1.5 rounded-full" style="width:${pg}%"></div></div>
+        <div class="mt-2 bg-emerald-200 rounded-full h-1.5">
+          <div class="bg-emerald-500 h-1.5 rounded-full" style="width:${pg}%"></div>
+        </div>
       </div>
       <div class="bg-violet-50 rounded-xl p-4">
         <p class="text-xs font-bold text-violet-500 uppercase tracking-wide mb-1">Matérias</p>
         <p class="text-3xl font-extrabold text-violet-700">${concluidas.length}</p>
-        <p class="text-xs text-violet-400 mt-1">de ${ativas.length+concluidas.length} concluídas</p>
+        <p class="text-xs text-violet-400 mt-1">de ${ativas.length + concluidas.length} concluídas</p>
       </div>
       <div class="bg-amber-50 rounded-xl p-4">
-        <p class="text-xs font-bold text-amber-500 uppercase tracking-wide mb-1">Revisões</p>
+        <p class="text-xs font-bold text-amber-500 uppercase tracking-wide mb-1">Revisões pend.</p>
         <p class="text-3xl font-extrabold text-amber-700">${revsPend}</p>
         <p class="text-xs text-amber-400 mt-1">${E.stats.revsFeitas} feitas</p>
       </div>
     </div>
   </div>
 
-  <!-- Abas -->
-  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-5">
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
     <div class="flex border-b border-slate-100">
-      <button onclick="E.aba='plano';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='plano'?'tab-active':'text-slate-500 hover:text-slate-700'}">📋 Plano de Estudo</button>
+      <button onclick="E.aba='plano';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='plano'?'tab-active':'text-slate-500 hover:text-slate-700'}">📋 Plano</button>
       <button onclick="E.aba='revs';render()" class="flex-1 px-6 py-4 text-sm font-semibold relative ${E.aba==='revs'?'tab-active':'text-slate-500 hover:text-slate-700'}">
         🔄 Revisões
-        ${revsPend>0?`<span class="absolute top-3 right-3 bg-amber-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">${revsPend}</span>`:''}
+        ${revsPend > 0 ? `<span class="absolute top-3 right-3 bg-amber-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">${revsPend}</span>` : ''}
       </button>
-      <button onclick="E.aba='historico';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='historico'?'tab-active':'text-slate-500 hover:text-slate-700'}">📈 Histórico</button>
+      <button onclick="E.aba='hist';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='hist'?'tab-active':'text-slate-500 hover:text-slate-700'}">📈 Histórico</button>
     </div>
-
     <div class="p-6">
-      ${E.aba==='plano' ? renderPlano(ativas, concluidas) : ''}
-      ${E.aba==='revs'  ? renderRevisoes() : ''}
-      ${E.aba==='historico' ? renderHistorico() : ''}
+      ${E.aba === 'plano' ? renderPlano(ativas, concluidas) : ''}
+      ${E.aba === 'revs'  ? renderRevisoes() : ''}
+      ${E.aba === 'hist'  ? renderHistorico() : ''}
     </div>
   </div>
 </div>`;
-
-  // expõe funções globais
-  Object.assign(window, {
-    E, render, abrirModalConcluir, confirmarExcluir,
-    marcarRevisao, editarDataRev, mostrarId,
-    exportar, importar, resetar, reorganizarAtrasos
-  });
 }
 
+// ═══════════════════════════════════════════════════════
+// RENDER: PLANO
+// ═══════════════════════════════════════════════════════
 function renderPlano(ativas, concluidas) {
   return `
-    <!-- Pendentes -->
     <div class="mb-8">
-      <h2 class="text-base font-bold text-slate-700 mb-4 flex items-center gap-2">
+      <h2 class="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
         <span class="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>
-        Em andamento <span class="text-slate-400 font-normal text-sm">(${ativas.length})</span>
+        Em andamento (${ativas.length})
       </h2>
-      ${ativas.length === 0 ? `<div class="text-center py-12 text-slate-400"><p class="text-4xl mb-2">🎉</p><p>Todas as matérias concluídas!</p></div>` : `
-      <div class="grid md:grid-cols-2 gap-3">
-        ${ativas.map(c => cardMateria(c, false)).join('')}
-      </div>`}
+      ${ativas.length === 0
+        ? '<div class="text-center py-12 text-slate-400"><p class="text-4xl mb-2">🎉</p><p>Todas concluídas!</p></div>'
+        : `<div class="grid md:grid-cols-2 gap-3">${ativas.map(c => cardMateria(c)).join('')}</div>`}
     </div>
-
-    <!-- Concluídas -->
     ${concluidas.length > 0 ? `
     <details>
-      <summary class="text-base font-bold text-slate-700 mb-4 flex items-center gap-2 select-none">
+      <summary class="text-sm font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2 select-none mb-2">
         <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-        Concluídas <span class="text-slate-400 font-normal text-sm">(${concluidas.length})</span>
-        <span class="ml-auto text-xs text-slate-400">▼ expandir</span>
+        Concluídas (${concluidas.length}) ▼
       </summary>
       <div class="grid md:grid-cols-2 gap-3 mt-4">
         ${concluidas.map(c => cardMateria(c, true)).join('')}
@@ -605,116 +621,122 @@ function renderPlano(ativas, concluidas) {
     </details>` : ''}`;
 }
 
-function cardMateria(c, done) {
-  const pct = c.aulasTotal ? Math.round(c.aulasConcluidas/c.aulasTotal*100) : 0;
-  const barColor = done ? 'bg-emerald-400' : 'bg-indigo-500';
-  const border = done ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-white';
-  const sessoesMat = E.sessoes.filter(s=>s.cronId===c.id);
-
+function cardMateria(c, done=false) {
+  const pct = c.aulasTotal ? Math.round(c.aulasConcluidas / c.aulasTotal * 100) : 0;
+  const border = done ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white';
+  const sessoesMat = E.sessoes.filter(s => s.cronId === c.id).length;
   return `
     <div class="card border-2 ${border} rounded-xl p-4">
       <div class="flex justify-between items-start gap-3 mb-3">
         <div class="flex-1 min-w-0">
-          <h4 class="font-bold text-slate-800 text-sm ${done?'line-through opacity-60':''} leading-snug">${c.ma}</h4>
-          <p class="text-xs text-slate-400 mt-1">${c.aulasConcluidas} / ${c.aulasTotal} aulas · ${sessoesMat.length} sessão(ões)</p>
+          <h4 class="font-bold text-slate-800 text-sm leading-snug ${done?'line-through opacity-50':''}">${c.ma}</h4>
+          <p class="text-xs text-slate-400 mt-1">${c.aulasConcluidas}/${c.aulasTotal} aulas · ${sessoesMat} sessão(ões)</p>
         </div>
         <div class="flex gap-1.5 flex-shrink-0">
-          ${!done ? `<button onclick="abrirModalConcluir('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">+ Estudei</button>` : ''}
-          <button onclick="confirmarExcluir('${c.id}')" class="bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-xs font-bold" title="Excluir">🗑️</button>
+          ${!done ? `<button onclick="abrirModalEstudo('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">+ Estudei</button>` : ''}
+          <button onclick="abrirModalExcluir('${c.id}')" class="bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-xs" title="Excluir">🗑️</button>
         </div>
       </div>
-      <!-- Barra de progresso -->
-      <div class="bg-slate-100 rounded-full h-1.5 mb-2">
-        <div class="${barColor} h-1.5 rounded-full transition-all" style="width:${pct}%"></div>
+      <div class="bg-slate-100 rounded-full h-1.5 mb-1">
+        <div class="${done?'bg-emerald-400':'bg-indigo-500'} h-1.5 rounded-full" style="width:${pct}%"></div>
       </div>
       <div class="flex justify-between text-xs text-slate-400">
-        <span>${pct}% concluído</span>
+        <span>${pct}%</span>
         <span>${c.aulasTotal - c.aulasConcluidas} restantes</span>
       </div>
     </div>`;
 }
 
+// ═══════════════════════════════════════════════════════
+// RENDER: REVISÕES
+// ═══════════════════════════════════════════════════════
 function renderRevisoes() {
   const hj = hoje();
-  const pendentes = E.revs.filter(r=>r.status==='p').sort((a,b)=>cmpDMY(a.dr,b.dr));
-  const concluidas = E.revs.filter(r=>r.status==='c').sort((a,b)=>cmpDMY(b.dr,a.dr));
+  const hjStr = fmtDMY(hj);
+  const pend = E.revs.filter(r => r.status === 'p').sort((a,b) => cmpDMY(a.dr, b.dr));
+  const conc = E.revs.filter(r => r.status === 'c').sort((a,b) => cmpDMY(b.dr, a.dr));
 
-  const atrasadas = pendentes.filter(r=>parseDMY(r.dr)<hj);
-  const hoje_ = pendentes.filter(r=>fmtDMY(parseDMY(r.dr))===fmtDMY(hj));
-  const futuras = pendentes.filter(r=>parseDMY(r.dr)>hj);
+  const atrasadas = pend.filter(r => parseDMY(r.dr) < hj);
+  const hoje_    = pend.filter(r => r.dr === hjStr);
+  const futuras  = pend.filter(r => parseDMY(r.dr) > hj);
 
-  const secRev = (titulo, lista, cor) => lista.length === 0 ? '' : `
-    <div class="mb-6">
-      <h3 class="text-sm font-bold text-slate-600 mb-3 uppercase tracking-wide">${titulo} (${lista.length})</h3>
-      <div class="space-y-2">
-        ${lista.map(r => cardRev(r, cor)).join('')}
-      </div>
-    </div>`;
+  const tipoCor = { '1ª (7d)':'indigo', '2ª (14d)':'violet', '3ª (30d)':'amber', '4ª (60d)':'rose' };
 
-  const tipoCor = {
-    '7d':'indigo','14d':'violet','30d':'amber','60d':'rose'
-  };
-
-  function cardRev(r, destaque) {
-    const cor = tipoCor[r.tipo]||'slate';
+  function secao(titulo, lista, destaque) {
+    if (!lista.length) return '';
     return `
-      <div class="card border-2 ${destaque==='red'?'border-red-200 bg-red-50/30':destaque==='green'?'border-emerald-200 bg-emerald-50/30':'border-slate-200 bg-white'} rounded-xl p-4">
-        <div class="flex justify-between items-start gap-3">
-          <div class="flex-1 min-w-0">
-            <div class="flex flex-wrap gap-1.5 mb-2">
-              <span class="badge bg-${cor}-100 text-${cor}-700">${r.tipo}</span>
-              <span class="badge bg-slate-100 text-slate-600">Aulas ${r.de}–${r.ate}</span>
-              ${destaque==='red'?'<span class="badge bg-red-500 text-white">⚠️ Atrasada</span>':''}
-            </div>
-            <p class="font-semibold text-slate-800 text-sm leading-snug">${r.ma}</p>
-            <div class="flex items-center gap-2 mt-1.5">
-              <span class="text-xs text-slate-500">📅 ${r.dr}</span>
-              <button onclick="editarDataRev('${r.id}')" class="text-xs text-indigo-400 hover:text-indigo-600">✏️</button>
-            </div>
-            ${r.notas?`<div class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-600 whitespace-pre-wrap">${r.notas}</div>`:''}
-          </div>
-          <button onclick="marcarRevisao('${r.id}')" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0">✓ Feita</button>
+      <div class="mb-6">
+        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">${titulo} (${lista.length})</h3>
+        <div class="space-y-2">
+          ${lista.map(r => {
+            const cor = tipoCor[r.tipo] || 'slate';
+            return `
+              <div class="card border-2 ${destaque==='red'?'border-red-200 bg-red-50/30':'border-slate-200 bg-white'} rounded-xl p-4">
+                <div class="flex justify-between items-start gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap gap-1.5 mb-2">
+                      <span class="badge bg-${cor}-100 text-${cor}-700">${r.tipo}</span>
+                      <span class="badge bg-slate-100 text-slate-600">Aulas ${r.de}–${r.ate}</span>
+                      ${destaque==='red'?'<span class="badge bg-red-500 text-white">⚠️ Atrasada</span>':''}
+                    </div>
+                    <p class="font-semibold text-slate-800 text-sm">${r.ma}</p>
+                    <div class="flex items-center gap-2 mt-1.5">
+                      <span class="text-xs text-slate-500">📅 ${r.dr}</span>
+                      <button onclick="abrirModalEditarData('${r.id}')" class="text-xs text-indigo-400 hover:text-indigo-600">✏️ editar</button>
+                    </div>
+                    ${r.notas ? `<p class="mt-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2 whitespace-pre-wrap">${r.notas}</p>` : ''}
+                  </div>
+                  <button onclick="marcarRevisao('${r.id}')" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0">✓ Feita</button>
+                </div>
+              </div>`;
+          }).join('')}
         </div>
       </div>`;
   }
 
-  return pendentes.length === 0 && concluidas.length === 0
-    ? `<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">🔄</p><p>Nenhuma revisão ainda.</p><p class="text-sm mt-1">Registre sessões de estudo no Plano!</p></div>`
-    : `
-      ${secRev('⚠️ Atrasadas', atrasadas, 'red')}
-      ${secRev('📅 Hoje', hoje_, 'today')}
-      ${secRev('📆 Próximas', futuras, 'future')}
-      ${concluidas.length>0?`
-      <details class="mt-4">
-        <summary class="text-sm font-bold text-slate-500 cursor-pointer">✅ Concluídas (${concluidas.length}) ▼</summary>
-        <div class="space-y-2 mt-3 opacity-60">
-          ${concluidas.map(r=>`
-            <div class="border border-slate-200 rounded-xl p-3 bg-slate-50">
-              <div class="flex gap-2 mb-1 flex-wrap">
-                <span class="badge bg-slate-200 text-slate-600">${r.tipo}</span>
-                <span class="badge bg-emerald-100 text-emerald-700">✓ Concluída</span>
-              </div>
-              <p class="text-sm font-medium line-through text-slate-500">${r.ma}</p>
-              <p class="text-xs text-slate-400 mt-1">📅 ${r.dr} · Aulas ${r.de}–${r.ate}</p>
-            </div>`).join('')}
-        </div>
-      </details>`:''}`;
+  if (!pend.length && !conc.length) {
+    return '<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">🔄</p><p>Nenhuma revisão ainda.</p><p class="text-sm mt-1">Registre aulas no Plano!</p></div>';
+  }
+
+  return `
+    ${secao('⚠️ Atrasadas', atrasadas, 'red')}
+    ${secao('📅 Hoje', hoje_, 'today')}
+    ${secao('📆 Próximas', futuras, 'future')}
+    ${conc.length ? `
+    <details class="mt-2">
+      <summary class="text-xs font-bold text-slate-400 uppercase tracking-wide cursor-pointer">✅ Concluídas (${conc.length}) ▼</summary>
+      <div class="space-y-2 mt-3 opacity-60">
+        ${conc.map(r => `
+          <div class="border border-slate-200 rounded-xl p-3 bg-slate-50">
+            <div class="flex gap-2 mb-1 flex-wrap">
+              <span class="badge bg-slate-200 text-slate-600">${r.tipo}</span>
+              <span class="badge bg-emerald-100 text-emerald-700">✓</span>
+            </div>
+            <p class="text-sm font-medium line-through text-slate-500">${r.ma}</p>
+            <p class="text-xs text-slate-400 mt-1">📅 ${r.dr} · Aulas ${r.de}–${r.ate}</p>
+          </div>`).join('')}
+      </div>
+    </details>` : ''}`;
 }
 
+// ═══════════════════════════════════════════════════════
+// RENDER: HISTÓRICO
+// ═══════════════════════════════════════════════════════
 function renderHistorico() {
-  if (!E.sessoes.length) return `<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">📈</p><p>Nenhuma sessão registrada ainda.</p></div>`;
-
-  const sorted = [...E.sessoes].sort((a,b)=>b.id.localeCompare(a.id));
+  if (!E.sessoes.length) {
+    return '<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">📈</p><p>Nenhuma sessão ainda.</p></div>';
+  }
+  const sorted = [...E.sessoes].sort((a,b) => b.id.localeCompare(a.id));
   return `
-    <h2 class="text-base font-bold text-slate-700 mb-4">📈 Histórico de sessões (${E.sessoes.length})</h2>
+    <h2 class="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4">📈 Sessões (${E.sessoes.length})</h2>
     <div class="space-y-2">
-      ${sorted.map(s=>`
-        <div class="border border-slate-200 rounded-xl p-4 bg-white card">
+      ${sorted.map(s => `
+        <div class="card border border-slate-200 rounded-xl p-4 bg-white">
           <div class="flex justify-between items-start gap-3">
             <div>
               <p class="font-semibold text-slate-800 text-sm">${s.ma}</p>
               <p class="text-xs text-slate-400 mt-1">📅 ${s.dt} · Aulas ${s.de}–${s.ate} · ${s.qtd} aula(s)</p>
-              ${s.notas?`<p class="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap">${s.notas}</p>`:''}
+              ${s.notas ? `<p class="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap">${s.notas}</p>` : ''}
             </div>
             <span class="badge bg-indigo-100 text-indigo-700 flex-shrink-0">${s.qtd} aulas</span>
           </div>
@@ -722,8 +744,10 @@ function renderHistorico() {
     </div>`;
 }
 
-// inicia
-loadCloud();
+// ═══════════════════════════════════════════════════════
+// INICIA
+// ═══════════════════════════════════════════════════════
+carregar();
 </script>
 </body>
 </html>
