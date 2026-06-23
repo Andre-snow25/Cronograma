@@ -52,8 +52,8 @@ const FB = {
 const fbApp = initializeApp(FB);
 const db = getFirestore(fbApp);
 
-let userId = localStorage.getItem('userId');
-if (!userId) { userId = 'u_' + Math.random().toString(36).substr(2,9); localStorage.setItem('userId', userId); }
+let userId = localStorage.getItem('userId') || ('u_' + Math.random().toString(36).substr(2,9));
+localStorage.setItem('userId', userId);
 
 // ─── Materiais ────────────────────────────────────────────────────────────────
 const MAT_ORIG = {
@@ -462,24 +462,35 @@ function resetar() {
 }
 
 function mostrarId() {
+  const idAtual = userId;
   const html = `
     <h3 class="text-lg font-bold mb-3">🆔 Seu ID de usuário</h3>
     <p class="text-sm text-gray-500 mb-3">Copie este ID para acessar seus dados em outro dispositivo.</p>
-    <div class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all mb-1 select-all cursor-copy" onclick="navigator.clipboard.writeText('${userId}').then(()=>ntf('✅ ID copiado!'))">${userId}</div>
-    <p class="text-xs text-slate-400 mb-4">Clique no ID acima para copiar</p>
+    <div id="id-display" class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all mb-1 select-all cursor-copy">${idAtual}</div>
+    <p class="text-xs text-slate-400 mb-4">Selecione o texto acima e copie (Ctrl+C)</p>
     <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
     <input id="m-novoId" placeholder="Cole o ID aqui..." class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none text-sm">
     <div class="flex gap-3">
       <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Fechar</button>
       <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
     </div>`;
-  openModal(html, () => {
+  openModal(html, async () => {
     const nv = document.getElementById('m-novoId').value.trim();
-    if (!nv || nv === userId) { ntf('ID igual ao atual, nada alterado.', 'warn'); return; }
-    // Limpa cache local para não misturar dados de IDs diferentes
-    localStorage.removeItem('cron3');
+    if (!nv) { ntf('Digite um ID válido', 'er'); return; }
+    if (nv === userId) { ntf('É o mesmo ID atual', 'warn'); return; }
+    // Troca o ID e recarrega os dados SEM reload da página
+    userId = nv;
     localStorage.setItem('userId', nv);
-    location.reload();
+    localStorage.removeItem('cron3');
+    // Reseta estado
+    E = {
+      aba: 'plano', cron: [], sessoes: [], revs: [],
+      stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
+      lastUpdated: ''
+    };
+    isLoading = true;
+    ntf('🔄 Trocando para novo ID...', 'info');
+    await loadCloud();
   });
 }
 
