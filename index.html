@@ -52,8 +52,13 @@ const FB = {
 const fbApp = initializeApp(FB);
 const db = getFirestore(fbApp);
 
-let userId = localStorage.getItem('userId') || ('u_' + Math.random().toString(36).substr(2,9));
-localStorage.setItem('userId', userId);
+// Sempre lê o userId mais recente do localStorage no momento do carregamento
+let userId = localStorage.getItem('userId');
+if (!userId) {
+  userId = 'u_' + Math.random().toString(36).substr(2,9);
+  localStorage.setItem('userId', userId);
+}
+console.log('Carregando com userId:', userId);
 
 // ─── Materiais ────────────────────────────────────────────────────────────────
 const MAT_ORIG = {
@@ -470,7 +475,7 @@ function mostrarId() {
   const idAtual = userId;
   const html = `
     <h3 class="text-lg font-bold mb-3">🆔 Seu ID de usuário</h3>
-    <p class="text-sm text-gray-500 mb-2">Copie este ID para acessar seus dados em outro dispositivo.</p>
+    <p class="text-sm text-gray-500 mb-2">Copie este ID para usar em outro dispositivo.</p>
     <div class="bg-slate-100 rounded-lg p-3 font-mono text-xs break-all mb-1 select-all border-2 border-slate-200">${idAtual}</div>
     <p class="text-xs text-slate-400 mb-4">Selecione e copie (Ctrl+C / Cmd+C)</p>
     <hr class="mb-4">
@@ -484,11 +489,11 @@ function mostrarId() {
     const nv = document.getElementById('m-novoId').value.trim();
     if (!nv) { ntf('Digite um ID válido', 'er'); return; }
     if (nv === userId) { ntf('Já está usando este ID', 'warn'); return; }
-    // Salva novo ID e recarrega a página normalmente
-    // (mais confiável que trocar em runtime)
+    // Grava o novo ID no localStorage e apaga cache ANTES do reload
     localStorage.setItem('userId', nv);
     localStorage.removeItem('cron3');
-    window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
+    // Força reload ignorando cache do browser
+    location.reload(true);
   });
 }
 
