@@ -133,47 +133,52 @@ async function saveCloud() {
 }
 
 async function loadCloud() {
-  // Tela de loading enquanto carrega
+  isLoading = true;
   document.getElementById('app').innerHTML = `
     <div class="flex flex-col items-center justify-center min-h-[60vh] text-slate-400">
       <div class="text-5xl mb-4 sync-pulse">☁️</div>
       <p class="text-lg font-semibold">Carregando cronograma...</p>
-      <p class="text-sm mt-2">Buscando dados na nuvem</p>
+      <p class="text-sm mt-2">ID: ${userId}</p>
     </div>`;
   try {
     showSync('Carregando...','syncing');
-    const snap = await getDoc(doc(db,'cronogramas',userId));
+    // timeout de segurança: se demorar mais de 8s, cai no fallback
+    const snap = await Promise.race([
+      getDoc(doc(db,'cronogramas',userId)),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
+    ]);
     if (snap.exists()) {
       const d = snap.data();
       E = { ...E, ...d };
       migrate();
       showSync('Carregado!','success');
     } else {
-      // ID novo ou sem dados — gera cronograma limpo
       E = {
         aba: 'plano', cron: [], sessoes: [], revs: [],
         stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
         lastUpdated: ''
       };
       genCron();
+      showSync('Novo cronograma criado!','success');
       await saveCloud();
     }
-    isLoading = false;
-    render();
-    setupRealtime();
   } catch(err) {
-    console.error(err);
+    console.error('loadCloud erro:', err);
     showSync('Erro ao carregar — usando dados locais','error');
     try { const s=localStorage.getItem('cron3'); if(s) E={...E,...JSON.parse(s)}; } catch {}
     migrate();
     if (!E.cron.length) genCron();
+  } finally {
     isLoading = false;
     render();
+    setupRealtime();
   }
 }
 
+let unsubRealtime = null;
 function setupRealtime() {
-  onSnapshot(doc(db,'cronogramas',userId), snap => {
+  if (unsubRealtime) { unsubRealtime(); unsubRealtime = null; }
+  unsubRealtime = onSnapshot(doc(db,'cronogramas',userId), snap => {
     if (snap.exists() && !isLoading) {
       const d = snap.data();
       if ((d.lastUpdated||'') > (E.lastUpdated||'')) {
@@ -465,32 +470,25 @@ function mostrarId() {
   const idAtual = userId;
   const html = `
     <h3 class="text-lg font-bold mb-3">🆔 Seu ID de usuário</h3>
-    <p class="text-sm text-gray-500 mb-3">Copie este ID para acessar seus dados em outro dispositivo.</p>
-    <div id="id-display" class="bg-slate-100 rounded-lg p-3 font-mono text-sm break-all mb-1 select-all cursor-copy">${idAtual}</div>
-    <p class="text-xs text-slate-400 mb-4">Selecione o texto acima e copie (Ctrl+C)</p>
+    <p class="text-sm text-gray-500 mb-2">Copie este ID para acessar seus dados em outro dispositivo.</p>
+    <div class="bg-slate-100 rounded-lg p-3 font-mono text-xs break-all mb-1 select-all border-2 border-slate-200">${idAtual}</div>
+    <p class="text-xs text-slate-400 mb-4">Selecione e copie (Ctrl+C / Cmd+C)</p>
+    <hr class="mb-4">
     <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
     <input id="m-novoId" placeholder="Cole o ID aqui..." class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none text-sm">
     <div class="flex gap-3">
       <button id="modal-cancel" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Fechar</button>
       <button id="modal-confirm" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
     </div>`;
-  openModal(html, async () => {
+  openModal(html, () => {
     const nv = document.getElementById('m-novoId').value.trim();
     if (!nv) { ntf('Digite um ID válido', 'er'); return; }
-    if (nv === userId) { ntf('É o mesmo ID atual', 'warn'); return; }
-    // Troca o ID e recarrega os dados SEM reload da página
-    userId = nv;
+    if (nv === userId) { ntf('Já está usando este ID', 'warn'); return; }
+    // Salva novo ID e recarrega a página normalmente
+    // (mais confiável que trocar em runtime)
     localStorage.setItem('userId', nv);
     localStorage.removeItem('cron3');
-    // Reseta estado
-    E = {
-      aba: 'plano', cron: [], sessoes: [], revs: [],
-      stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
-      lastUpdated: ''
-    };
-    isLoading = true;
-    ntf('🔄 Trocando para novo ID...', 'info');
-    await loadCloud();
+    window.location.href = window.location.href.split('?')[0] + '?t=' + Date.now();
   });
 }
 
