@@ -3,751 +3,655 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cronograma PC SP 2026</title>
+<title>Cronograma PC SP 2026 - Nuvem</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-  body { font-family: 'Inter', system-ui, sans-serif; }
-  .tab-active { border-bottom: 3px solid #6366f1; color: #6366f1; font-weight: 700; }
-  .fade { animation: fadeIn .25s ease; }
-  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-  .pulse { animation: pulse 1.8s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-  .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
-  .card { transition: box-shadow .15s, transform .15s; }
-  .card:hover { box-shadow:0 4px 20px rgba(0,0,0,.08); transform:translateY(-1px); }
-  details > summary { list-style:none; cursor:pointer; }
-  details > summary::-webkit-details-marker { display:none; }
-  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:200; display:flex; align-items:center; justify-content:center; }
-  .modal-box { background:#fff; border-radius:16px; padding:28px; max-width:420px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,.3); }
-  textarea { resize:vertical; min-height:52px; }
+body{font-family:system-ui}
+.fade{animation:f .3s}
+@keyframes f{from{opacity:0}to{opacity:1}}
+.tab-active{border-bottom:3px solid #4f46e5;color:#4f46e5}
+textarea{resize:vertical;min-height:60px}
+.sync-indicator{animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center}
+.modal-box{background:#fff;border-radius:16px;padding:28px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
 </style>
 </head>
-<body class="bg-slate-100 min-h-screen">
-
-<div id="notifs" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
-<div id="sync-bar" class="fixed top-4 left-4 z-50"></div>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
+<div id="n" class="fixed top-4 right-4 z-50"></div>
+<div id="sync-status" class="fixed top-4 left-4 z-50"></div>
 <div id="modal-root"></div>
-<div id="app" class="max-w-5xl mx-auto px-4 py-6"></div>
+<div id="app" class="max-w-7xl mx-auto"></div>
 
-<!-- Firebase via CDN clássico (não module) para evitar escopo isolado -->
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-<script>
-// ═══════════════════════════════════════════════════════
-// FIREBASE
-// ═══════════════════════════════════════════════════════
-firebase.initializeApp({
+const firebaseConfig = {
   apiKey: "AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
   authDomain: "cronograma-d352c.firebaseapp.com",
   projectId: "cronograma-d352c",
   storageBucket: "cronograma-d352c.firebasestorage.app",
   messagingSenderId: "1035295977614",
   appId: "1:1035295977614:web:e4ef9bfd959470f0b759df"
-});
-const db = firebase.firestore();
+};
 
-// ═══════════════════════════════════════════════════════
-// USERID
-// ═══════════════════════════════════════════════════════
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 let userId = localStorage.getItem('userId');
 if (!userId) {
-  userId = 'u_' + Math.random().toString(36).substr(2, 9);
+  userId = 'user_' + Math.random().toString(36).substr(2, 9);
   localStorage.setItem('userId', userId);
 }
 
-// ═══════════════════════════════════════════════════════
-// MATERIAIS
-// ═══════════════════════════════════════════════════════
-const MATERIAIS = {
-  'Direito Penal – Parte Geral': 53,
-  'Direito Penal – Parte Especial': 151,
-  'Direito Processual Penal': 53,
-  'Legislação Penal Especial': 168,
-  'Direito Constitucional': 45,
-  'Criminologia': 52,
-  'Princípios Constitucionais': 30,
-  'Direitos Humanos': 48,
-  'Controle de Constitucionalidade': 25,
-  'Direito Penal Militar': 35,
-  'Execução Penal': 40,
-  'Tribunal do Júri': 28,
-  'Lei de Drogas': 20,
-  'Português': 81,
-  'Raciocínio Lógico': 101,
-  'Raciocínio Lógico (Matemático)': 80,
-  'Informática': 160,
-  'Informática (Teoria e Exercícios)': 70,
-  'Matemática': 90
-};
-
-// ═══════════════════════════════════════════════════════
-// ESTADO
-// ═══════════════════════════════════════════════════════
-let E = {
-  aba: 'plano',
-  cron: [],      // [{id, ma, aulasTotal, aulasConcluidas, concluido, deletado}]
-  sessoes: [],   // [{id, dt, cronId, ma, de, ate, qtd, notas}]
-  revs: [],      // [{id, sessaoId, ma, de, ate, qtd, notas, dr, tipo, status}]
-  stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
-  lastUpdated: ''
-};
-
+let e={aba:'plano',cron:[],sessoes:[],revs:[],stats:{a:0,d:0,r:0}};
+let syncEnabled = true;
+let isLoading = true;
 let unsubRealtime = null;
-let salvando = false;
 
-// ═══════════════════════════════════════════════════════
-// UTILITÁRIOS DE DATA
-// ═══════════════════════════════════════════════════════
-function hoje() {
-  const d = new Date(); d.setHours(0,0,0,0); return d;
-}
-function parseDMY(s) {
-  const p = s.split('/');
-  return new Date(+p[2], +p[1]-1, +p[0]);
-}
-function fmtDMY(d) {
-  const dd = String(d.getDate()).padStart(2,'0');
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const yy = d.getFullYear();
-  return `${dd}/${mm}/${yy}`;
-}
-function addDays(d, n) {
-  const r = new Date(d); r.setDate(r.getDate() + n); return r;
-}
-function cmpDMY(a, b) { return parseDMY(a) - parseDMY(b); }
+const mat={
+'Direito Penal – Parte Geral':53,
+'Direito Penal – Parte Especial':151,
+'Direito Processual Penal':53,
+'Legislação Penal Especial':168,
+'Direito Constitucional':45,
+'Criminologia':52,
+'Princípios Constitucionais':30,
+'Direitos Humanos':48,
+'Controle de Constitucionalidade':25,
+'Direito Penal Militar':35,
+'Execução Penal':40,
+'Tribunal do Júri':28,
+'Lei de Drogas':20,
+'Português':81,
+'Raciocínio Lógico':101,
+'Raciocínio Lógico (Matemático)':80,
+'Informática':160,
+'Informática (Teoria e Exercícios)':70,
+'Matemática':90
+};
 
-// ═══════════════════════════════════════════════════════
-// NOTIFICAÇÕES
-// ═══════════════════════════════════════════════════════
-function ntf(msg, tp='ok') {
-  const cores = {ok:'bg-emerald-500', er:'bg-red-500', warn:'bg-amber-500', info:'bg-blue-500'};
-  const el = document.createElement('div');
-  el.className = `${cores[tp]||cores.ok} text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium fade pointer-events-auto`;
-  el.textContent = msg;
-  document.getElementById('notifs').appendChild(el);
-  setTimeout(() => el.remove(), 3000);
-}
-
-function syncBar(msg, tp='info') {
-  const cores = {info:'bg-blue-500', ok:'bg-emerald-500', er:'bg-red-500', load:'bg-amber-500'};
-  const ic = {info:'☁️', ok:'✅', er:'❌', load:'🔄'};
-  document.getElementById('sync-bar').innerHTML = `
-    <div class="${cores[tp]} text-white px-4 py-2 rounded-xl shadow text-sm font-medium flex items-center gap-2 ${tp==='load'?'pulse':''}">
-      ${ic[tp]} ${msg}
-    </div>`;
-  if (tp !== 'load') setTimeout(() => { document.getElementById('sync-bar').innerHTML = ''; }, 3000);
+// ── Expõe tudo no window para os onclick funcionarem ──
+function expor() {
+  window.e = e;
+  window.rend = rend;
+  window.registrarEstudo = registrarEstudo;
+  window.confirmarRegistro = confirmarRegistro;
+  window.excluirMateria = excluirMateria;
+  window.confirmarExcluir = confirmarExcluir;
+  window.mkR = mkR;
+  window.editData = editData;
+  window.confirmarEditData = confirmarEditData;
+  window.exp = exp;
+  window.imp = imp;
+  window.rst = rst;
+  window.showUserId = showUserId;
+  window.trocarId = trocarId;
+  window.reorganizarAtrasos = reorganizarAtrasos;
+  window.fecharModal = fecharModal;
 }
 
-// ═══════════════════════════════════════════════════════
-// MODAL
-// ═══════════════════════════════════════════════════════
-function abrirModal(html, onOk) {
-  const root = document.getElementById('modal-root');
-  root.innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal-box fade">${html}</div></div>`;
-  const overlay = document.getElementById('modal-overlay');
-  const btnOk  = root.querySelector('#btn-ok');
-  const btnCnl = root.querySelector('#btn-cancel');
-  if (btnOk)  btnOk.onclick  = () => { fecharModal(); if (onOk) onOk(); };
-  if (btnCnl) btnCnl.onclick = fecharModal;
-  overlay.onclick = (e) => { if (e.target === overlay) fecharModal(); };
+// ── Modal ──────────────────────────────────────────────
+function abrirModal(html) {
+  document.getElementById('modal-root').innerHTML =
+    `<div class="modal-overlay" onclick="if(event.target===this)fecharModal()"><div class="modal-box fade">${html}</div></div>`;
+  expor();
 }
 function fecharModal() {
   document.getElementById('modal-root').innerHTML = '';
 }
 
-// ═══════════════════════════════════════════════════════
-// FIREBASE: SALVAR / CARREGAR
-// ═══════════════════════════════════════════════════════
-async function salvar() {
-  if (salvando) return;
-  salvando = true;
-  try {
-    E.lastUpdated = new Date().toISOString();
-    await db.collection('cronogramas').doc(userId).set(E);
-    syncBar('Salvo!', 'ok');
-    try { localStorage.setItem('cron4', JSON.stringify(E)); } catch {}
-  } catch(err) {
-    console.error('Erro ao salvar:', err);
-    syncBar('Erro ao salvar', 'er');
-    // salva local como fallback
-    try { localStorage.setItem('cron4', JSON.stringify(E)); } catch {}
-  } finally {
-    salvando = false;
-  }
-}
-
-async function carregar() {
-  syncBar('Carregando...', 'load');
-  document.getElementById('app').innerHTML = `
-    <div class="flex flex-col items-center justify-center min-h-[60vh] text-slate-400">
-      <div class="text-5xl mb-4 pulse">☁️</div>
-      <p class="text-lg font-semibold">Carregando...</p>
-      <p class="text-xs mt-2 font-mono">${userId}</p>
+// ── Sync status ────────────────────────────────────────
+function showSyncStatus(msg, type='info') {
+  const colors={info:'bg-blue-500',success:'bg-green-500',error:'bg-red-500',syncing:'bg-yellow-500'};
+  const icons={info:'☁️',success:'✅',error:'❌',syncing:'🔄'};
+  document.getElementById('sync-status').innerHTML=`
+    <div class="${colors[type]} text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${type==='syncing'?'sync-indicator':''}">
+      <span>${icons[type]}</span><span class="text-sm font-medium">${msg}</span>
     </div>`;
-
-  try {
-    const snap = await db.collection('cronogramas').doc(userId).get();
-    if (snap.exists) {
-      E = snap.data();
-      garantirCampos();
-      syncBar('Carregado!', 'ok');
-    } else {
-      // Primeiro acesso com este ID
-      resetarEstado();
-      gerarCronograma();
-      await salvar();
-      syncBar('Novo cronograma criado!', 'ok');
-    }
-  } catch(err) {
-    console.error('Erro ao carregar:', err);
-    syncBar('Offline — carregando local', 'warn');
-    const local = localStorage.getItem('cron4');
-    if (local) {
-      try { E = JSON.parse(local); garantirCampos(); } catch { resetarEstado(); gerarCronograma(); }
-    } else {
-      resetarEstado();
-      gerarCronograma();
-    }
-  }
-
-  render();
-  iniciarRealtime();
+  if(type!=='syncing') setTimeout(()=>{document.getElementById('sync-status').innerHTML='';},3000);
 }
 
-function iniciarRealtime() {
-  if (unsubRealtime) { unsubRealtime(); unsubRealtime = null; }
-  unsubRealtime = db.collection('cronogramas').doc(userId).onSnapshot(snap => {
-    if (snap.exists) {
-      const d = snap.data();
-      if (d.lastUpdated && d.lastUpdated > (E.lastUpdated || '')) {
-        E = d;
-        garantirCampos();
-        render();
-        ntf('🔄 Sincronizado de outro dispositivo!');
+// ── Save / Load ────────────────────────────────────────
+async function saveToCloud() {
+  if(!syncEnabled) return;
+  try {
+    showSyncStatus('Sincronizando...','syncing');
+    const docRef = doc(db,'cronogramas',userId);
+    await setDoc(docRef,{...e, lastUpdated:new Date().toISOString()});
+    showSyncStatus('Salvo na nuvem!','success');
+  } catch(error) {
+    console.error('Erro ao salvar:',error);
+    showSyncStatus('Erro ao sincronizar','error');
+  }
+  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
+}
+
+async function loadFromCloud() {
+  try {
+    showSyncStatus('Carregando da nuvem...','syncing');
+    const docRef = doc(db,'cronogramas',userId);
+    const docSnap = await getDoc(docRef);
+    if(docSnap.exists()) {
+      const data = docSnap.data();
+      e={...e,...data};
+      migrar();
+    } else {
+      gerarCronograma();
+      await saveToCloud();
+    }
+    isLoading=false;
+    rend();
+    setupRealtimeSync();
+    showSyncStatus('Carregado!','success');
+  } catch(error) {
+    console.error('Erro ao carregar:',error);
+    showSyncStatus('Erro ao carregar','error');
+    ld();
+    isLoading=false;
+    rend();
+  }
+}
+
+function setupRealtimeSync() {
+  if(unsubRealtime){unsubRealtime();unsubRealtime=null;}
+  const docRef=doc(db,'cronogramas',userId);
+  unsubRealtime=onSnapshot(docRef,(snap)=>{
+    if(snap.exists()&&!isLoading){
+      const data=snap.data();
+      const currentUpdate=e.lastUpdated||'';
+      const cloudUpdate=data.lastUpdated||'';
+      if(cloudUpdate>currentUpdate){
+        e={...e,...data};
+        migrar();
+        rend();
+        ntf('🔄 Atualizado de outro dispositivo!');
       }
     }
-  }, err => console.error('Realtime erro:', err));
-}
-
-// ═══════════════════════════════════════════════════════
-// ESTADO: HELPERS
-// ═══════════════════════════════════════════════════════
-function resetarEstado() {
-  E = {
-    aba: 'plano',
-    cron: [], sessoes: [], revs: [],
-    stats: { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 },
-    lastUpdated: ''
-  };
-}
-
-function garantirCampos() {
-  if (!E.cron)    E.cron    = [];
-  if (!E.sessoes) E.sessoes = [];
-  if (!E.revs)    E.revs    = [];
-  if (!E.stats)   E.stats   = { aulasFeitas: 0, sessoes: 0, revsFeitas: 0 };
-  if (!E.stats.aulasFeitas) E.stats.aulasFeitas = 0;
-  if (!E.stats.sessoes)     E.stats.sessoes     = 0;
-  if (!E.stats.revsFeitas)  E.stats.revsFeitas  = 0;
-  E.cron.forEach(c => {
-    if (c.deletado === undefined) c.deletado = false;
-    if (c.aulasConcluidas === undefined) c.aulasConcluidas = 0;
-    if (c.concluido === undefined) c.concluido = false;
   });
 }
 
+function sv(){saveToCloud();try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}}
+function ld(){
+  try{const s=localStorage.getItem('cron2');if(s)e={...e,...JSON.parse(s)};migrar();}catch{}
+  if(!e.cron||!e.cron.length)gerarCronograma();
+}
+
+// ── Migração de dados antigos ──────────────────────────
+function migrar() {
+  if(!e.cron)e.cron=[];
+  if(!e.sessoes)e.sessoes=[];
+  if(!e.revs)e.revs=[];
+  if(!e.stats)e.stats={a:0,d:0,r:0};
+  // migra formato antigo (dias) para novo (cron por matéria)
+  if(e.dias&&e.dias.length&&!e.cron.length){
+    gerarCronograma();
+    // recalcula progresso a partir dos dias antigos
+    e.dias.forEach(d=>{
+      const item=e.cron.find(c=>c.ma===d.ma);
+      if(item){item.aulasConcluidas=Math.min(item.aulasConcluidas+d.q,item.aulasTotal);}
+    });
+    e.cron.forEach(c=>{if(c.aulasConcluidas>=c.aulasTotal)c.concluido=true;});
+  }
+  e.cron.forEach(c=>{
+    if(c.deletado===undefined)c.deletado=false;
+    if(c.aulasConcluidas===undefined)c.aulasConcluidas=0;
+    if(c.concluido===undefined)c.concluido=false;
+  });
+}
+
+// ── Gera cronograma inicial ────────────────────────────
 function gerarCronograma() {
-  E.cron = Object.entries(MATERIAIS).map(([ma, total], i) => ({
-    id: 'c' + i,
-    ma,
-    aulasTotal: total,
-    aulasConcluidas: 0,
-    concluido: false,
-    deletado: false
+  e.cron=Object.entries(mat).map(([ma,total],i)=>({
+    id:'c'+i, ma, aulasTotal:total, aulasConcluidas:0, concluido:false, deletado:false
   }));
 }
 
-// ═══════════════════════════════════════════════════════
-// REVISÕES
-// ═══════════════════════════════════════════════════════
-function gerarRevisoes(sessao, data1) {
-  // Conta revisões pendentes por data
-  const cnt = {};
-  E.revs.filter(r => r.status === 'p').forEach(r => { cnt[r.dr] = (cnt[r.dr] || 0) + 1; });
+// ── Notificações ───────────────────────────────────────
+function ntf(msg,tp='ok'){
+  const cor={ok:'bg-green-500',er:'bg-red-500',warn:'bg-yellow-500'};
+  const dv=document.createElement('div');
+  dv.className=`${cor[tp]||cor.ok} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
+  dv.textContent=msg;
+  document.getElementById('n').appendChild(dv);
+  setTimeout(()=>dv.remove(),3000);
+}
 
-  // Intervalos a partir da data1 escolhida pelo usuário
-  const intervalos = [
-    { tipo: '1ª (7d)',  dias: 0  },
-    { tipo: '2ª (14d)', dias: 7  },
-    { tipo: '3ª (30d)', dias: 23 },
-    { tipo: '4ª (60d)', dias: 53 }
+// ── Data helpers ───────────────────────────────────────
+function hoje(){const h=new Date();h.setHours(0,0,0,0);return h;}
+function fmtDMY(d){return d.toLocaleDateString('pt-BR');}
+function parseDMY(s){const[d,m,y]=s.split('/');return new Date(+y,+m-1,+d);}
+function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+function cmpDMY(a,b){return parseDMY(a)-parseDMY(b);}
+
+// ── Revisões: máx 2 por dia ────────────────────────────
+function gerarRevisoes(sessao, data1rev) {
+  const intervalos=[
+    {tipo:'1ª revisão',dias:0},
+    {tipo:'2ª revisão',dias:7},
+    {tipo:'3ª revisão',dias:23},
+    {tipo:'4ª revisão',dias:53}
   ];
+  const cnt={};
+  e.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
 
-  intervalos.forEach(({ tipo, dias }) => {
-    let d = addDays(data1, dias);
-    // Empurra até achar dia com menos de 2 revisões
-    for (let i = 0; i < 365; i++) {
-      const k = fmtDMY(d);
-      if ((cnt[k] || 0) < 2) {
-        cnt[k] = (cnt[k] || 0) + 1;
-        E.revs.push({
-          id: 'r' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-          sessaoId: sessao.id,
-          ma: sessao.ma,
-          de: sessao.de,
-          ate: sessao.ate,
-          qtd: sessao.qtd,
-          notas: sessao.notas,
-          dr: k,
-          tipo,
-          status: 'p'
+  intervalos.forEach(({tipo,dias})=>{
+    let d=addDays(data1rev,dias);
+    for(let i=0;i<365;i++){
+      const k=fmtDMY(d);
+      if((cnt[k]||0)<2){
+        cnt[k]=(cnt[k]||0)+1;
+        e.revs.push({
+          id:`r${Date.now()}_${tipo}_${Math.random().toString(36).substr(2,4)}`,
+          sessaoId:sessao.id,ma:sessao.ma,de:sessao.de,ate:sessao.ate,
+          qtd:sessao.qtd,notas:sessao.notas,dr:k,tipo,s:'p'
         });
         break;
       }
-      d = addDays(d, 1);
+      d=addDays(d,1);
     }
   });
 }
 
-function reorganizarAtrasos() {
-  const hj = hoje();
-  const atrasadas = E.revs.filter(r => r.status === 'p' && parseDMY(r.dr) < hj);
-  if (!atrasadas.length) { ntf('✅ Nenhum atraso!'); return; }
-
-  const cnt = {};
-  E.revs.filter(r => r.status === 'p' && parseDMY(r.dr) >= hj)
-        .forEach(r => { cnt[r.dr] = (cnt[r.dr] || 0) + 1; });
-
-  atrasadas.sort((a,b) => cmpDMY(a.dr, b.dr)).forEach(r => {
-    let d = new Date(hj);
-    for (let i = 0; i < 365; i++) {
-      const k = fmtDMY(d);
-      if ((cnt[k] || 0) < 2) { cnt[k] = (cnt[k]||0)+1; r.dr = k; break; }
-      d = addDays(d, 1);
+// ── Reorganizar atrasos ────────────────────────────────
+function reorganizarAtrasos(){
+  const hj=hoje();
+  const atrasadas=e.revs.filter(r=>r.s==='p'&&parseDMY(r.dr)<hj).sort((a,b)=>cmpDMY(a.dr,b.dr));
+  if(!atrasadas.length){ntf('✅ Nenhum atraso!');return;}
+  const cnt={};
+  e.revs.filter(r=>r.s==='p'&&parseDMY(r.dr)>=hj).forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+  atrasadas.forEach(r=>{
+    let d=new Date(hj);
+    for(let i=0;i<365;i++){
+      const k=fmtDMY(d);
+      if((cnt[k]||0)<2){cnt[k]=(cnt[k]||0)+1;r.dr=k;break;}
+      d=addDays(d,1);
     }
   });
-
-  salvar(); render();
+  sv();rend();
   ntf(`🔄 ${atrasadas.length} revisão(ões) redistribuída(s)!`);
 }
 
-// ═══════════════════════════════════════════════════════
-// AÇÕES
-// ═══════════════════════════════════════════════════════
-function abrirModalEstudo(cronId) {
-  const item = E.cron.find(c => c.id === cronId);
-  if (!item) return;
-  const restante = item.aulasTotal - item.aulasConcluidas;
-  const data1padrao = fmtDMY(addDays(hoje(), 7));
-  // Converte para yyyy-mm-dd para o input type=date
-  const [dd,mm,yy] = data1padrao.split('/');
-  const data1input = `${yy}-${mm}-${dd}`;
-
+// ── Registrar estudo ───────────────────────────────────
+function registrarEstudo(cronId){
+  const item=e.cron.find(c=>c.id===cronId);
+  if(!item)return;
+  const restante=item.aulasTotal-item.aulasConcluidas;
+  const d1=fmtDMY(addDays(hoje(),7));
+  const[dd,mm,yy]=d1.split('/');
   abrirModal(`
     <h3 class="text-lg font-bold mb-1">✅ Registrar estudo</h3>
-    <p class="text-sm font-semibold text-slate-700 mb-1">${item.ma}</p>
-    <p class="text-xs text-slate-400 mb-4">${item.aulasConcluidas}/${item.aulasTotal} aulas concluídas · ${restante} restantes</p>
-
+    <p class="text-sm font-semibold text-gray-700 mb-1">${item.ma}</p>
+    <p class="text-xs text-gray-400 mb-4">${item.aulasConcluidas}/${item.aulasTotal} aulas • ${restante} restantes</p>
     <label class="block text-sm font-semibold mb-1">Quantas aulas você estudou?</label>
-    <input id="inp-qtd" type="number" min="1" max="${restante}" value="1"
-      class="w-full border-2 border-slate-200 rounded-lg p-3 mb-4 text-center text-2xl font-bold focus:border-indigo-500 focus:outline-none">
-
+    <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
     <label class="block text-sm font-semibold mb-1">📅 Data da 1ª revisão</label>
-    <input id="inp-data1" type="date" value="${data1input}"
-      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-4 focus:border-indigo-500 focus:outline-none">
-
+    <input id="m-data1" type="date" value="${yy}-${mm}-${dd}"
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 focus:border-indigo-500 focus:outline-none">
     <label class="block text-sm font-semibold mb-1">📝 Anotações (opcional)</label>
-    <textarea id="inp-notas" placeholder="Títulos das aulas, pontos importantes..."
-      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none"></textarea>
-
+    <textarea id="m-notas" placeholder="Títulos das aulas, pontos importantes..."
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none"></textarea>
     <div class="flex gap-3">
-      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold hover:bg-slate-50">Cancelar</button>
-      <button id="btn-ok" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
-    </div>`,
-  () => {
-    const qtd = Math.max(1, Math.min(restante, parseInt(document.getElementById('inp-qtd').value) || 1));
-    const dataStr = document.getElementById('inp-data1').value;
-    const notas   = document.getElementById('inp-notas').value.trim();
-
-    if (!dataStr) { ntf('Informe a data da 1ª revisão', 'er'); return; }
-
-    // Converte yyyy-mm-dd → Date
-    const [y,m,d] = dataStr.split('-');
-    const data1 = new Date(+y, +m-1, +d);
-
-    const de  = item.aulasConcluidas + 1;
-    const ate = item.aulasConcluidas + qtd;
-
-    const sessao = {
-      id: 's' + Date.now(),
-      dt: fmtDMY(hoje()),
-      cronId,
-      ma: item.ma,
-      de, ate, qtd, notas
-    };
-
-    E.sessoes.push(sessao);
-    item.aulasConcluidas += qtd;
-    if (item.aulasConcluidas >= item.aulasTotal) item.concluido = true;
-    E.stats.aulasFeitas += qtd;
-    E.stats.sessoes++;
-
-    gerarRevisoes(sessao, data1);
-    salvar();
-    render();
-    ntf(`🎉 +${qtd} aula(s) registrada(s)!`);
-  });
+      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+      <button onclick="confirmarRegistro('${cronId}')" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
+    </div>`);
 }
 
-function abrirModalExcluir(cronId) {
-  const item = E.cron.find(c => c.id === cronId);
-  if (!item) return;
+function confirmarRegistro(cronId){
+  const item=e.cron.find(c=>c.id===cronId);
+  if(!item)return;
+  const restante=item.aulasTotal-item.aulasConcluidas;
+  const qtd=Math.max(1,Math.min(restante,parseInt(document.getElementById('m-qtd').value)||1));
+  const dataStr=document.getElementById('m-data1').value;
+  const notas=document.getElementById('m-notas').value.trim();
+  if(!dataStr){ntf('Informe a data da 1ª revisão','er');return;}
+  const[y,m,d]=dataStr.split('-');
+  const data1=new Date(+y,+m-1,+d);
+  const de=item.aulasConcluidas+1;
+  const ate=item.aulasConcluidas+qtd;
+  const sessao={id:'s'+Date.now(),dt:fmtDMY(hoje()),cronId,ma:item.ma,de,ate,qtd,notas};
+  e.sessoes.push(sessao);
+  item.aulasConcluidas+=qtd;
+  if(item.aulasConcluidas>=item.aulasTotal)item.concluido=true;
+  e.stats.a+=qtd;
+  e.stats.d++;
+  gerarRevisoes(sessao,data1);
+  fecharModal();
+  sv();rend();
+  ntf(`🎉 +${qtd} aula(s) em ${item.ma}!`);
+}
+
+// ── Excluir matéria ────────────────────────────────────
+function excluirMateria(cronId){
+  const item=e.cron.find(c=>c.id===cronId);
+  if(!item)return;
   abrirModal(`
     <h3 class="text-lg font-bold mb-3">🗑️ Excluir matéria</h3>
-    <p class="text-sm text-slate-600 mb-5">Remover <strong>${item.ma}</strong> do cronograma?</p>
+    <p class="text-sm text-gray-600 mb-5">Remover <strong>${item.ma}</strong> do cronograma?</p>
     <div class="flex gap-3">
-      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button id="btn-ok" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold hover:bg-red-600">Excluir</button>
-    </div>`,
-  () => { item.deletado = true; salvar(); render(); ntf('🗑️ Matéria removida'); });
+      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button onclick="confirmarExcluir('${cronId}')" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold hover:bg-red-600">Excluir</button>
+    </div>`);
 }
 
-function marcarRevisao(revId) {
-  const r = E.revs.find(x => x.id === revId);
-  if (!r) return;
-  r.status = 'c';
-  E.stats.revsFeitas++;
-  salvar(); render();
-  ntf('✅ Revisão concluída!');
+function confirmarExcluir(cronId){
+  const item=e.cron.find(c=>c.id===cronId);
+  if(!item)return;
+  item.deletado=true;
+  fecharModal();sv();rend();
+  ntf('🗑️ Matéria removida');
 }
 
-function abrirModalEditarData(revId) {
-  const r = E.revs.find(x => x.id === revId);
-  if (!r) return;
-  const [dd,mm,yy] = r.dr.split('/');
+// ── Revisões: marcar / editar data ────────────────────
+function mkR(id){
+  const r=e.revs.find(x=>x.id===id);
+  if(!r)return;
+  r.s='c';e.stats.r++;
+  sv();rend();ntf('✅ Revisão OK!');
+}
+
+function editData(id){
+  const r=e.revs.find(x=>x.id===id);
+  if(!r)return;
+  const[dd,mm,yy]=r.dr.split('/');
   abrirModal(`
-    <h3 class="text-lg font-bold mb-2">📅 Alterar data</h3>
-    <p class="text-sm text-slate-500 mb-4">${r.ma} · ${r.tipo}</p>
-    <input id="inp-novaData" type="date" value="${yy}-${mm}-${dd}"
-      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none">
+    <h3 class="text-lg font-bold mb-2">📅 Alterar data da revisão</h3>
+    <p class="text-sm text-gray-500 mb-4">${r.ma} · ${r.tipo}</p>
+    <input id="m-nd" type="date" value="${yy}-${mm}-${dd}"
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none">
     <div class="flex gap-3">
-      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button id="btn-ok" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Salvar</button>
-    </div>`,
-  () => {
-    const v = document.getElementById('inp-novaData').value;
-    if (!v) return;
-    const [y2,m2,d2] = v.split('-');
-    r.dr = `${d2}/${m2}/${y2}`;
-    salvar(); render();
-    ntf('📅 Data atualizada!');
-  });
+      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button onclick="confirmarEditData('${id}')" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Salvar</button>
+    </div>`);
 }
 
-function abrirModalId() {
-  abrirModal(`
-    <h3 class="text-lg font-bold mb-2">🆔 ID de usuário</h3>
-    <p class="text-sm text-slate-500 mb-2">Use este ID em outro dispositivo para acessar seus dados.</p>
-    <div class="bg-slate-100 border-2 border-slate-200 rounded-lg p-3 font-mono text-xs break-all select-all mb-4">${userId}</div>
-    <hr class="mb-4 border-slate-200">
-    <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
-    <input id="inp-novo-id" type="text" placeholder="Cole o ID aqui..."
-      class="w-full border-2 border-slate-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none">
-    <div class="flex gap-3">
-      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Fechar</button>
-      <button id="btn-ok" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
-    </div>`,
-  () => {
-    const novo = document.getElementById('inp-novo-id').value.trim();
-    if (!novo) { ntf('Digite um ID', 'er'); return; }
-    if (novo === userId) { ntf('Já está usando este ID', 'warn'); return; }
-
-    // Para o listener atual
-    if (unsubRealtime) { unsubRealtime(); unsubRealtime = null; }
-
-    // Atualiza userId globalmente e no localStorage
-    userId = novo;
-    localStorage.setItem('userId', novo);
-    localStorage.removeItem('cron4');
-
-    // Reseta estado e carrega do novo ID
-    resetarEstado();
-    ntf('🔄 Trocando ID...', 'info');
-    carregar();
-  });
+function confirmarEditData(id){
+  const r=e.revs.find(x=>x.id===id);
+  if(!r)return;
+  const v=document.getElementById('m-nd').value;
+  if(!v)return;
+  const[yy,mm,dd]=v.split('-');
+  r.dr=`${dd}/${mm}/${yy}`;
+  fecharModal();sv();rend();ntf('📅 Data atualizada!');
 }
 
-function abrirModalReset() {
+// ── Exportar / Importar / Resetar ─────────────────────
+function exp(){
+  const b=new Blob([JSON.stringify(e,null,2)],{type:'application/json'});
+  const u=URL.createObjectURL(b);
+  const a=document.createElement('a');
+  a.href=u;a.download=`backup-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();URL.revokeObjectURL(u);ntf('💾 Exportado!');
+}
+
+function imp(ev){
+  const f=ev.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=x=>{
+    try{e={...e,...JSON.parse(x.target.result)};migrar();sv();rend();ntf('📥 Importado!');}
+    catch{ntf('❌ Erro','er');}
+  };r.readAsText(f);
+}
+
+function rst(){
   abrirModal(`
     <h3 class="text-lg font-bold mb-3">⚠️ Resetar tudo</h3>
-    <p class="text-sm text-slate-600 mb-5">Apaga <strong>todo o progresso</strong> da nuvem e localmente. Não pode ser desfeito.</p>
+    <p class="text-sm text-gray-600 mb-5">Apaga todo o progresso (nuvem e local). Não pode ser desfeito.</p>
     <div class="flex gap-3">
-      <button id="btn-cancel" class="flex-1 border-2 border-slate-200 text-slate-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button id="btn-ok" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold">Resetar</button>
-    </div>`,
-  () => {
-    resetarEstado();
-    gerarCronograma();
-    localStorage.removeItem('cron4');
-    salvar(); render();
-    ntf('🔄 Cronograma resetado!');
-  });
+      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
+      <button onclick="confirmarReset()" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold">Resetar</button>
+    </div>`);
 }
 
-function exportar() {
-  const b = new Blob([JSON.stringify(E, null, 2)], { type: 'application/json' });
-  const u = URL.createObjectURL(b);
-  const a = document.createElement('a');
-  a.href = u;
-  a.download = `backup-pcsp-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();
-  URL.revokeObjectURL(u);
-  ntf('💾 Exportado!');
+window.confirmarReset=function(){
+  fecharModal();
+  e={aba:'plano',cron:[],sessoes:[],revs:[],stats:{a:0,d:0,r:0}};
+  gerarCronograma();
+  sv();rend();ntf('🔄 Resetado!');
+};
+
+// ── Trocar ID ──────────────────────────────────────────
+function showUserId(){
+  abrirModal(`
+    <h3 class="text-lg font-bold mb-2">🆔 ID de usuário</h3>
+    <p class="text-sm text-gray-500 mb-2">Use este ID em outro dispositivo para acessar seus dados.</p>
+    <div class="bg-gray-100 rounded-lg p-3 font-mono text-xs break-all select-all mb-4">${userId}</div>
+    <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
+    <input id="m-nid" type="text" placeholder="Cole o ID aqui..."
+      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none">
+    <div class="flex gap-3">
+      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Fechar</button>
+      <button onclick="trocarId()" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
+    </div>`);
 }
 
-function importar(ev) {
-  const f = ev.target.files[0]; if (!f) return;
-  const r = new FileReader();
-  r.onload = x => {
-    try {
-      E = JSON.parse(x.target.result);
-      garantirCampos();
-      salvar(); render();
-      ntf('📥 Importado!');
-    } catch { ntf('❌ Arquivo inválido', 'er'); }
-  };
-  r.readAsText(f);
+function trocarId(){
+  const nv=document.getElementById('m-nid').value.trim();
+  if(!nv){ntf('Digite um ID','er');return;}
+  if(nv===userId){ntf('Já está usando este ID','warn');return;}
+  fecharModal();
+  // Para o listener atual
+  if(unsubRealtime){unsubRealtime();unsubRealtime=null;}
+  // Atualiza userId
+  userId=nv;
+  localStorage.setItem('userId',nv);
+  localStorage.removeItem('cron2');
+  // Reseta estado e recarrega
+  e={aba:'plano',cron:[],sessoes:[],revs:[],stats:{a:0,d:0,r:0}};
+  isLoading=true;
+  ntf('🔄 Carregando novo ID...','warn');
+  loadFromCloud();
 }
 
-// ═══════════════════════════════════════════════════════
-// RENDER PRINCIPAL
-// ═══════════════════════════════════════════════════════
-function render() {
-  const hj = hoje();
-  const totalAulas = E.cron.filter(c => !c.deletado).reduce((s,c) => s + c.aulasTotal, 0);
-  const pg = totalAulas ? (E.stats.aulasFeitas / totalAulas * 100).toFixed(1) : '0.0';
-  const revsPend = E.revs.filter(r => r.status === 'p').length;
-  const temAtrasados = E.revs.some(r => r.status === 'p' && parseDMY(r.dr) < hj);
-  const ativas = E.cron.filter(c => !c.deletado && !c.concluido);
-  const concluidas = E.cron.filter(c => !c.deletado && c.concluido);
+// ── Render ─────────────────────────────────────────────
+function rend(){
+  expor();
+  const hj=hoje();
+  const totalAulas=e.cron.filter(c=>!c.deletado).reduce((s,c)=>s+c.aulasTotal,0);
+  const pg=totalAulas?(e.stats.a/totalAulas*100).toFixed(1):'0.0';
+  const pd=e.revs.filter(x=>x.s==='p').length;
+  const temAtrasados=e.revs.some(r=>r.s==='p'&&parseDMY(r.dr)<hj);
+  const ativas=e.cron.filter(c=>!c.deletado&&!c.concluido);
+  const concluidas=e.cron.filter(c=>!c.deletado&&c.concluido);
 
-  document.getElementById('app').innerHTML = `
-<div class="fade">
-  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-5">
-    <div class="flex justify-between items-start gap-4 flex-wrap mb-5">
-      <div>
-        <h1 class="text-2xl font-extrabold text-slate-800">📚 Cronograma PC SP 2026</h1>
-        <p class="text-slate-500 text-sm mt-1">Revisão espaçada · Nuvem ☁️</p>
-        <button onclick="abrirModalId()" class="text-xs text-indigo-500 hover:underline mt-1">🆔 ${userId.substr(0,16)}...</button>
-      </div>
-      <div class="flex gap-2 flex-wrap">
-        ${temAtrasados ? `<button onclick="reorganizarAtrasos()" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-bold shadow">⚡ Reorganizar atrasos</button>` : ''}
-        <button onclick="exportar()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium">💾 Exportar</button>
-        <label class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer">📥 Importar
-          <input type="file" accept=".json" onchange="importar(event)" class="hidden">
-        </label>
-        <button onclick="abrirModalReset()" class="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-medium">🔄 Resetar</button>
-      </div>
+  document.getElementById('app').innerHTML=`
+<div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+  <div class="flex justify-between items-start gap-4 mb-6 flex-wrap">
+    <div>
+      <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
+      <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
+      <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,16)}...</button>
     </div>
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="bg-indigo-50 rounded-xl p-4">
-        <p class="text-xs font-bold text-indigo-500 uppercase tracking-wide mb-1">Aulas feitas</p>
-        <p class="text-3xl font-extrabold text-indigo-700">${E.stats.aulasFeitas}</p>
-        <p class="text-xs text-indigo-400 mt-1">de ${totalAulas}</p>
-      </div>
-      <div class="bg-emerald-50 rounded-xl p-4">
-        <p class="text-xs font-bold text-emerald-500 uppercase tracking-wide mb-1">Progresso</p>
-        <p class="text-3xl font-extrabold text-emerald-700">${pg}%</p>
-        <div class="mt-2 bg-emerald-200 rounded-full h-1.5">
-          <div class="bg-emerald-500 h-1.5 rounded-full" style="width:${pg}%"></div>
-        </div>
-      </div>
-      <div class="bg-violet-50 rounded-xl p-4">
-        <p class="text-xs font-bold text-violet-500 uppercase tracking-wide mb-1">Matérias</p>
-        <p class="text-3xl font-extrabold text-violet-700">${concluidas.length}</p>
-        <p class="text-xs text-violet-400 mt-1">de ${ativas.length + concluidas.length} concluídas</p>
-      </div>
-      <div class="bg-amber-50 rounded-xl p-4">
-        <p class="text-xs font-bold text-amber-500 uppercase tracking-wide mb-1">Revisões pend.</p>
-        <p class="text-3xl font-extrabold text-amber-700">${revsPend}</p>
-        <p class="text-xs text-amber-400 mt-1">${E.stats.revsFeitas} feitas</p>
-      </div>
+    <div class="flex gap-2 flex-wrap">
+      ${temAtrasados?`<button onclick="reorganizarAtrasos()" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 text-sm font-bold shadow-lg">🔄 Reorganizar Atrasos</button>`:''}
+      <button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
+      <label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
+      <button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
     </div>
   </div>
-
-  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-    <div class="flex border-b border-slate-100">
-      <button onclick="E.aba='plano';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='plano'?'tab-active':'text-slate-500 hover:text-slate-700'}">📋 Plano</button>
-      <button onclick="E.aba='revs';render()" class="flex-1 px-6 py-4 text-sm font-semibold relative ${E.aba==='revs'?'tab-active':'text-slate-500 hover:text-slate-700'}">
-        🔄 Revisões
-        ${revsPend > 0 ? `<span class="absolute top-3 right-3 bg-amber-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">${revsPend}</span>` : ''}
-      </button>
-      <button onclick="E.aba='hist';render()" class="flex-1 px-6 py-4 text-sm font-semibold ${E.aba==='hist'?'tab-active':'text-slate-500 hover:text-slate-700'}">📈 Histórico</button>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl">
+      <p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p>
+      <p class="text-3xl font-bold text-indigo-700">${e.stats.a}</p>
+      <p class="text-xs text-indigo-600">de ${totalAulas}</p>
     </div>
-    <div class="p-6">
-      ${E.aba === 'plano' ? renderPlano(ativas, concluidas) : ''}
-      ${E.aba === 'revs'  ? renderRevisoes() : ''}
-      ${E.aba === 'hist'  ? renderHistorico() : ''}
+    <div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl">
+      <p class="text-sm font-bold text-green-900 mb-1">📊 Progresso</p>
+      <p class="text-3xl font-bold text-green-700">${pg}%</p>
+    </div>
+    <div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl">
+      <p class="text-sm font-bold text-purple-900 mb-1">📖 Matérias</p>
+      <p class="text-3xl font-bold text-purple-700">${concluidas.length}</p>
+      <p class="text-xs text-purple-600">de ${ativas.length+concluidas.length} concluídas</p>
+    </div>
+    <div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl">
+      <p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p>
+      <p class="text-3xl font-bold text-orange-700">${pd}</p>
+      <p class="text-xs text-orange-600">${e.stats.r} completas</p>
     </div>
   </div>
+</div>
+
+<div class="bg-white rounded-t-2xl shadow-xl">
+  <div class="flex border-b overflow-x-auto">
+    <button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
+    <button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">
+      🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">${pd}</span>`:''}
+    </button>
+    <button onclick="e.aba='hist';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='hist'?'tab-active':'text-gray-600 hover:text-gray-800'}">📈 Histórico</button>
+  </div>
+</div>
+
+<div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
+  ${e.aba==='plano'?renderPlano(ativas,concluidas):''}
+  ${e.aba==='revs'?renderRevisoes():''}
+  ${e.aba==='hist'?renderHistorico():''}
 </div>`;
+  expor();
 }
 
-// ═══════════════════════════════════════════════════════
-// RENDER: PLANO
-// ═══════════════════════════════════════════════════════
-function renderPlano(ativas, concluidas) {
+// ── Render Plano ───────────────────────────────────────
+function renderPlano(ativas,concluidas){
   return `
+    <h2 class="text-2xl font-bold mb-4">📋 Plano de Estudo</h2>
+
     <div class="mb-8">
-      <h2 class="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4 flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>
+      <h3 class="text-lg font-bold text-gray-700 mb-3 flex items-center gap-2">
+        <span class="w-3 h-3 rounded-full bg-indigo-500 inline-block"></span>
         Em andamento (${ativas.length})
-      </h2>
-      ${ativas.length === 0
-        ? '<div class="text-center py-12 text-slate-400"><p class="text-4xl mb-2">🎉</p><p>Todas concluídas!</p></div>'
-        : `<div class="grid md:grid-cols-2 gap-3">${ativas.map(c => cardMateria(c)).join('')}</div>`}
+      </h3>
+      ${ativas.length===0
+        ?'<div class="text-center py-12 text-gray-400"><p class="text-4xl mb-2">🎉</p><p>Todas concluídas!</p></div>'
+        :`<div class="grid md:grid-cols-2 gap-3">${ativas.map(c=>cardMateria(c,false)).join('')}</div>`}
     </div>
-    ${concluidas.length > 0 ? `
+
+    ${concluidas.length>0?`
     <details>
-      <summary class="text-sm font-bold text-slate-500 uppercase tracking-wide flex items-center gap-2 select-none mb-2">
-        <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+      <summary class="text-lg font-bold text-gray-700 mb-3 flex items-center gap-2 cursor-pointer select-none list-none">
+        <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span>
         Concluídas (${concluidas.length}) ▼
       </summary>
       <div class="grid md:grid-cols-2 gap-3 mt-4">
-        ${concluidas.map(c => cardMateria(c, true)).join('')}
+        ${concluidas.map(c=>cardMateria(c,true)).join('')}
       </div>
-    </details>` : ''}`;
+    </details>`:''}`;
 }
 
-function cardMateria(c, done=false) {
-  const pct = c.aulasTotal ? Math.round(c.aulasConcluidas / c.aulasTotal * 100) : 0;
-  const border = done ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-white';
-  const sessoesMat = E.sessoes.filter(s => s.cronId === c.id).length;
+function cardMateria(c,done){
+  const pct=c.aulasTotal?Math.round(c.aulasConcluidas/c.aulasTotal*100):0;
+  const sessoesMat=(e.sessoes||[]).filter(s=>s.cronId===c.id).length;
+  const border=done?'border-green-200 bg-green-50':'border-gray-200 bg-white';
   return `
-    <div class="card border-2 ${border} rounded-xl p-4">
+    <div class="border-2 ${border} rounded-xl p-4 hover:shadow-lg transition-all">
       <div class="flex justify-between items-start gap-3 mb-3">
         <div class="flex-1 min-w-0">
-          <h4 class="font-bold text-slate-800 text-sm leading-snug ${done?'line-through opacity-50':''}">${c.ma}</h4>
-          <p class="text-xs text-slate-400 mt-1">${c.aulasConcluidas}/${c.aulasTotal} aulas · ${sessoesMat} sessão(ões)</p>
+          <h4 class="font-bold text-gray-800 ${done?'line-through opacity-60':''} break-words">${c.ma}</h4>
+          <p class="text-xs text-gray-400 mt-1">${c.aulasConcluidas}/${c.aulasTotal} aulas · ${sessoesMat} sessão(ões)</p>
         </div>
         <div class="flex gap-1.5 flex-shrink-0">
-          ${!done ? `<button onclick="abrirModalEstudo('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">+ Estudei</button>` : ''}
-          <button onclick="abrirModalExcluir('${c.id}')" class="bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-xs" title="Excluir">🗑️</button>
+          ${!done?`<button onclick="registrarEstudo('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">+ Estudei</button>`:''}
+          <button onclick="excluirMateria('${c.id}')" class="bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-xs font-bold" title="Excluir">🗑️</button>
         </div>
       </div>
-      <div class="bg-slate-100 rounded-full h-1.5 mb-1">
-        <div class="${done?'bg-emerald-400':'bg-indigo-500'} h-1.5 rounded-full" style="width:${pct}%"></div>
+      <div class="bg-gray-200 rounded-full h-2 mb-1">
+        <div class="${done?'bg-green-500':'bg-indigo-500'} h-2 rounded-full transition-all" style="width:${pct}%"></div>
       </div>
-      <div class="flex justify-between text-xs text-slate-400">
-        <span>${pct}%</span>
-        <span>${c.aulasTotal - c.aulasConcluidas} restantes</span>
+      <div class="flex justify-between text-xs text-gray-400">
+        <span>${pct}% concluído</span>
+        <span>${c.aulasTotal-c.aulasConcluidas} restantes</span>
       </div>
     </div>`;
 }
 
-// ═══════════════════════════════════════════════════════
-// RENDER: REVISÕES
-// ═══════════════════════════════════════════════════════
-function renderRevisoes() {
-  const hj = hoje();
-  const hjStr = fmtDMY(hj);
-  const pend = E.revs.filter(r => r.status === 'p').sort((a,b) => cmpDMY(a.dr, b.dr));
-  const conc = E.revs.filter(r => r.status === 'c').sort((a,b) => cmpDMY(b.dr, a.dr));
+// ── Render Revisões ────────────────────────────────────
+function renderRevisoes(){
+  const hj=hoje();
+  const hjStr=fmtDMY(hj);
+  const pend=e.revs.filter(r=>r.s==='p').sort((a,b)=>cmpDMY(a.dr,b.dr));
+  const conc=e.revs.filter(r=>r.s==='c').sort((a,b)=>cmpDMY(b.dr,a.dr));
+  const atrasadas=pend.filter(r=>parseDMY(r.dr)<hj);
+  const hoje_=pend.filter(r=>r.dr===hjStr);
+  const futuras=pend.filter(r=>parseDMY(r.dr)>hj);
 
-  const atrasadas = pend.filter(r => parseDMY(r.dr) < hj);
-  const hoje_    = pend.filter(r => r.dr === hjStr);
-  const futuras  = pend.filter(r => parseDMY(r.dr) > hj);
-
-  const tipoCor = { '1ª (7d)':'indigo', '2ª (14d)':'violet', '3ª (30d)':'amber', '4ª (60d)':'rose' };
-
-  function secao(titulo, lista, destaque) {
-    if (!lista.length) return '';
+  function cardRev(r,destaque){
+    const corBorder=destaque==='red'?'border-red-200 bg-red-50':'border-gray-200 bg-white';
     return `
-      <div class="mb-6">
-        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">${titulo} (${lista.length})</h3>
-        <div class="space-y-2">
-          ${lista.map(r => {
-            const cor = tipoCor[r.tipo] || 'slate';
-            return `
-              <div class="card border-2 ${destaque==='red'?'border-red-200 bg-red-50/30':'border-slate-200 bg-white'} rounded-xl p-4">
-                <div class="flex justify-between items-start gap-3">
-                  <div class="flex-1 min-w-0">
-                    <div class="flex flex-wrap gap-1.5 mb-2">
-                      <span class="badge bg-${cor}-100 text-${cor}-700">${r.tipo}</span>
-                      <span class="badge bg-slate-100 text-slate-600">Aulas ${r.de}–${r.ate}</span>
-                      ${destaque==='red'?'<span class="badge bg-red-500 text-white">⚠️ Atrasada</span>':''}
-                    </div>
-                    <p class="font-semibold text-slate-800 text-sm">${r.ma}</p>
-                    <div class="flex items-center gap-2 mt-1.5">
-                      <span class="text-xs text-slate-500">📅 ${r.dr}</span>
-                      <button onclick="abrirModalEditarData('${r.id}')" class="text-xs text-indigo-400 hover:text-indigo-600">✏️ editar</button>
-                    </div>
-                    ${r.notas ? `<p class="mt-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2 whitespace-pre-wrap">${r.notas}</p>` : ''}
-                  </div>
-                  <button onclick="marcarRevisao('${r.id}')" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex-shrink-0">✓ Feita</button>
-                </div>
-              </div>`;
-          }).join('')}
+      <div class="border-2 ${corBorder} rounded-xl p-4 hover:shadow-lg transition-all mb-3">
+        <div class="flex justify-between items-start gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex gap-2 mb-2 flex-wrap">
+              <span class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs font-bold">${r.tipo}</span>
+              <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">Aulas ${r.de}–${r.ate}</span>
+              ${destaque==='red'?'<span class="bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">⚠️ Atrasada</span>':''}
+            </div>
+            <h4 class="font-bold text-gray-800 mb-1">${r.ma}</h4>
+            <div class="flex items-center gap-2">
+              <span class="text-sm text-gray-500">📅 ${r.dr}</span>
+              <button onclick="editData('${r.id}')" class="text-xs text-indigo-500 hover:underline">✏️ editar</button>
+            </div>
+            ${r.notas?`<div class="mt-2 bg-blue-50 border border-blue-200 rounded p-2 text-xs text-blue-800 whitespace-pre-wrap">${r.notas}</div>`:''}
+          </div>
+          <button onclick="mkR('${r.id}')" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex-shrink-0">✓ Feita</button>
         </div>
       </div>`;
   }
 
-  if (!pend.length && !conc.length) {
-    return '<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">🔄</p><p>Nenhuma revisão ainda.</p><p class="text-sm mt-1">Registre aulas no Plano!</p></div>';
+  function secao(titulo,lista,dest){
+    if(!lista.length)return'';
+    return`<div class="mb-6"><h3 class="text-lg font-bold text-gray-700 mb-3">${titulo} (${lista.length})</h3>${lista.map(r=>cardRev(r,dest)).join('')}</div>`;
   }
 
-  return `
-    ${secao('⚠️ Atrasadas', atrasadas, 'red')}
-    ${secao('📅 Hoje', hoje_, 'today')}
-    ${secao('📆 Próximas', futuras, 'future')}
-    ${conc.length ? `
-    <details class="mt-2">
-      <summary class="text-xs font-bold text-slate-400 uppercase tracking-wide cursor-pointer">✅ Concluídas (${conc.length}) ▼</summary>
-      <div class="space-y-2 mt-3 opacity-60">
-        ${conc.map(r => `
-          <div class="border border-slate-200 rounded-xl p-3 bg-slate-50">
-            <div class="flex gap-2 mb-1 flex-wrap">
-              <span class="badge bg-slate-200 text-slate-600">${r.tipo}</span>
-              <span class="badge bg-emerald-100 text-emerald-700">✓</span>
+  if(!pend.length&&!conc.length)
+    return`<div class="text-center py-16"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete dias no Plano!</p></div>`;
+
+  return`
+    ${secao('⚠️ Atrasadas',atrasadas,'red')}
+    ${secao('📅 Hoje',hoje_,'today')}
+    ${secao('📆 Próximas',futuras,'future')}
+    ${conc.length?`
+    <details class="mt-4">
+      <summary class="text-lg font-bold text-green-700 cursor-pointer select-none list-none">✅ Concluídas (${conc.length}) ▼</summary>
+      <div class="max-h-80 overflow-y-auto mt-3 space-y-2">
+        ${conc.map(r=>`
+          <div class="border border-green-200 bg-green-50 rounded-xl p-3 opacity-75">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">${r.tipo}</span>
+              <strong class="text-sm">${r.dr}</strong>
             </div>
-            <p class="text-sm font-medium line-through text-slate-500">${r.ma}</p>
-            <p class="text-xs text-slate-400 mt-1">📅 ${r.dr} · Aulas ${r.de}–${r.ate}</p>
+            <p class="font-bold line-through text-gray-600">${r.ma}</p>
+            <p class="text-xs text-gray-400 mt-1">Aulas ${r.de}–${r.ate}</p>
           </div>`).join('')}
       </div>
-    </details>` : ''}`;
+    </details>`:''}`;
 }
 
-// ═══════════════════════════════════════════════════════
-// RENDER: HISTÓRICO
-// ═══════════════════════════════════════════════════════
-function renderHistorico() {
-  if (!E.sessoes.length) {
-    return '<div class="text-center py-16 text-slate-400"><p class="text-5xl mb-3">📈</p><p>Nenhuma sessão ainda.</p></div>';
-  }
-  const sorted = [...E.sessoes].sort((a,b) => b.id.localeCompare(a.id));
-  return `
-    <h2 class="text-sm font-bold text-slate-600 uppercase tracking-wide mb-4">📈 Sessões (${E.sessoes.length})</h2>
+// ── Render Histórico ───────────────────────────────────
+function renderHistorico(){
+  if(!e.sessoes||!e.sessoes.length)
+    return`<div class="text-center py-16"><span class="text-6xl block mb-3">📈</span><p class="text-gray-500 text-lg">Nenhuma sessão registrada</p></div>`;
+  const sorted=[...e.sessoes].sort((a,b)=>b.id.localeCompare(a.id));
+  return`
+    <h2 class="text-2xl font-bold mb-4">📈 Histórico (${e.sessoes.length} sessões)</h2>
     <div class="space-y-2">
-      ${sorted.map(s => `
-        <div class="card border border-slate-200 rounded-xl p-4 bg-white">
+      ${sorted.map(s=>`
+        <div class="border border-gray-200 rounded-xl p-4 bg-white hover:shadow transition-all">
           <div class="flex justify-between items-start gap-3">
             <div>
-              <p class="font-semibold text-slate-800 text-sm">${s.ma}</p>
-              <p class="text-xs text-slate-400 mt-1">📅 ${s.dt} · Aulas ${s.de}–${s.ate} · ${s.qtd} aula(s)</p>
-              ${s.notas ? `<p class="text-xs text-slate-500 mt-1.5 whitespace-pre-wrap">${s.notas}</p>` : ''}
+              <p class="font-bold text-gray-800">${s.ma}</p>
+              <p class="text-xs text-gray-400 mt-1">📅 ${s.dt} · Aulas ${s.de}–${s.ate} · ${s.qtd} aula(s)</p>
+              ${s.notas?`<p class="text-xs text-gray-500 mt-1.5 whitespace-pre-wrap">${s.notas}</p>`:''}
             </div>
-            <span class="badge bg-indigo-100 text-indigo-700 flex-shrink-0">${s.qtd} aulas</span>
+            <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex-shrink-0">${s.qtd} aulas</span>
           </div>
         </div>`).join('')}
     </div>`;
 }
 
-// ═══════════════════════════════════════════════════════
-// INICIA
-// ═══════════════════════════════════════════════════════
-carregar();
+// ── Inicia ─────────────────────────────────────────────
+expor();
+loadFromCloud();
 </script>
 </body>
 </html>
