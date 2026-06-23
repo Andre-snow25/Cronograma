@@ -17,6 +17,11 @@ textarea{resize:vertical;min-height:60px}
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
 <div id="n" class="fixed top-4 right-4 z-50"></div>
+<div id="modal-root"></div>
+<style>
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;}
+.modal-box{background:#fff;border-radius:16px;padding:28px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+</style>
 <div id="sync-status" class="fixed top-4 left-4 z-50"></div>
 <div id="app" class="max-w-7xl mx-auto"></div>
 
@@ -224,41 +229,67 @@ function gerarRevisoes(dsId, ma, de, ate, qtd, data1){
   });
 }
 
-// Registrar aulas estudadas numa matéria
+// Abre modal para registrar estudo
 function registrarAulas(id){
   const item = e.cron.find(c=>c.id===id);
   if(!item) return;
   const restante = item.aulasTotal - item.aulasConcluidas;
-
-  // Pergunta quantas aulas estudou
-  const qtdStr = prompt(`📚 ${item.ma}\n\nTotal: ${item.aulasTotal} aulas\nConcluídas: ${item.aulasConcluidas}\nRestantes: ${restante}\n\nQuantas aulas você estudou hoje?`);
-  if(qtdStr===null) return;
-  const qtd = parseInt(qtdStr);
-  if(!qtd || qtd<=0){ntf('❌ Quantidade inválida','er');return;}
-  const real = Math.min(qtd, restante);
-
-  // Pergunta a data da 1ª revisão
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const sugestao = fmtDMY(addDias(hoje,7));
-  const dataStr = prompt(`📅 Data da 1ª revisão (dd/mm/aaaa):\n(As demais serão calculadas a partir desta data)`, sugestao);
-  if(dataStr===null) return;
-  if(!/^\d{2}\/\d{2}\/\d{4}$/.test(dataStr)){ntf('❌ Formato inválido! Use dd/mm/aaaa','er');return;}
-  const data1 = parseDMY(dataStr);
+  // sugestão: hoje + 7 dias em yyyy-mm-dd para input type=date
+  const sug = addDias(hoje,7);
+  const sugISO = sug.getFullYear()+'-'+String(sug.getMonth()+1).padStart(2,'0')+'-'+String(sug.getDate()).padStart(2,'0');
 
-  const de = item.aulasConcluidas+1;
-  const ate = item.aulasConcluidas+real;
-  item.aulasConcluidas += real;
-  if(item.aulasConcluidas>=item.aulasTotal) item.concluido=true;
-  e.stats.a += real;
-  e.stats.d++;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade">
+        <h3 class="text-lg font-bold mb-1">📚 Registrar estudo</h3>
+        <p class="text-sm text-gray-500 mb-4">${item.ma}</p>
 
-  const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:''};
-  e.dias.push(ds);
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Quantas aulas você estudou?</label>
+        <div class="flex items-center gap-3 mb-4">
+          <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
+            class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
+          <span class="text-sm text-gray-400">de ${restante} restantes</span>
+        </div>
 
-  gerarRevisoes(ds.id, item.ma, de, ate, real, data1);
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data da 1ª revisão</label>
+        <input id="m-data1" type="date" value="${sugISO}"
+          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-1 focus:border-indigo-500 focus:outline-none">
+        <p class="text-xs text-gray-400 mb-5">As demais revisões serão calculadas a partir desta data.</p>
 
-  sv();rend();
-  ntf(`🎉 +${real} aulas em ${item.ma}!`);
+        <div class="flex gap-3">
+          <button id="m-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="m-confirmar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('m-cancelar').onclick = () => {
+    document.getElementById('modal-root').innerHTML = '';
+  };
+
+  document.getElementById('m-confirmar').onclick = () => {
+    const qtd = parseInt(document.getElementById('m-qtd').value)||0;
+    const dataStr = document.getElementById('m-data1').value;
+    if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de aulas','er');return;}
+    if(!dataStr){ntf('❌ Informe a data da 1ª revisão','er');return;}
+    const real = Math.min(qtd, restante);
+    // converte yyyy-mm-dd para Date
+    const [y,m,d] = dataStr.split('-');
+    const data1 = new Date(+y,+m-1,+d);
+    const de = item.aulasConcluidas+1;
+    const ate = item.aulasConcluidas+real;
+    item.aulasConcluidas += real;
+    if(item.aulasConcluidas>=item.aulasTotal) item.concluido=true;
+    e.stats.a += real;
+    e.stats.d++;
+    const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:''};
+    e.dias.push(ds);
+    gerarRevisoes(ds.id, item.ma, de, ate, real, data1);
+    document.getElementById('modal-root').innerHTML = '';
+    sv();rend();
+    ntf(`🎉 +${real} aulas em ${item.ma}!`);
+  };
 }
 
 function mkR(id){
