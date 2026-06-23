@@ -13,14 +13,11 @@ body{font-family:system-ui}
 textarea{resize:vertical;min-height:60px}
 .sync-indicator{animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center}
-.modal-box{background:#fff;border-radius:16px;padding:28px;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
 </style>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
 <div id="n" class="fixed top-4 right-4 z-50"></div>
 <div id="sync-status" class="fixed top-4 left-4 z-50"></div>
-<div id="modal-root"></div>
 <div id="app" class="max-w-7xl mx-auto"></div>
 
 <script type="module">
@@ -45,10 +42,9 @@ if (!userId) {
   localStorage.setItem('userId', userId);
 }
 
-let e={aba:'plano',cron:[],sessoes:[],revs:[],stats:{a:0,d:0,r:0}};
+let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{},dataReprogramacao:null};
 let syncEnabled = true;
 let isLoading = true;
-let unsubRealtime = null;
 
 const mat={
 'Direito Penal – Parte Geral':53,
@@ -72,99 +68,87 @@ const mat={
 'Matemática':90
 };
 
-// ── Expõe tudo no window para os onclick funcionarem ──
-function expor() {
-  window.e = e;
-  window.rend = rend;
-  window.registrarEstudo = registrarEstudo;
-  window.confirmarRegistro = confirmarRegistro;
-  window.excluirMateria = excluirMateria;
-  window.confirmarExcluir = confirmarExcluir;
-  window.mkR = mkR;
-  window.editData = editData;
-  window.confirmarEditData = confirmarEditData;
-  window.exp = exp;
-  window.imp = imp;
-  window.rst = rst;
-  window.showUserId = showUserId;
-  window.trocarId = trocarId;
-  window.reorganizarAtrasos = reorganizarAtrasos;
-  window.fecharModal = fecharModal;
-}
-
-// ── Modal ──────────────────────────────────────────────
-function abrirModal(html) {
-  document.getElementById('modal-root').innerHTML =
-    `<div class="modal-overlay" onclick="if(event.target===this)fecharModal()"><div class="modal-box fade">${html}</div></div>`;
-  expor();
-}
-function fecharModal() {
-  document.getElementById('modal-root').innerHTML = '';
-}
-
-// ── Sync status ────────────────────────────────────────
 function showSyncStatus(msg, type='info') {
-  const colors={info:'bg-blue-500',success:'bg-green-500',error:'bg-red-500',syncing:'bg-yellow-500'};
-  const icons={info:'☁️',success:'✅',error:'❌',syncing:'🔄'};
-  document.getElementById('sync-status').innerHTML=`
-    <div class="${colors[type]} text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${type==='syncing'?'sync-indicator':''}">
-      <span>${icons[type]}</span><span class="text-sm font-medium">${msg}</span>
-    </div>`;
-  if(type!=='syncing') setTimeout(()=>{document.getElementById('sync-status').innerHTML='';},3000);
+  const colors = {
+    info: 'bg-blue-500',
+    success: 'bg-green-500',
+    error: 'bg-red-500',
+    syncing: 'bg-yellow-500'
+  };
+  const icons = {
+    info: '☁️',
+    success: '✅',
+    error: '❌',
+    syncing: '🔄'
+  };
+  document.getElementById('sync-status').innerHTML = `
+    <div class="${colors[type]} text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${type === 'syncing' ? 'sync-indicator' : ''}">
+      <span>${icons[type]}</span>
+      <span class="text-sm font-medium">${msg}</span>
+    </div>
+  `;
+  if (type !== 'syncing') {
+    setTimeout(() => {
+      document.getElementById('sync-status').innerHTML = '';
+    }, 3000);
+  }
 }
 
-// ── Save / Load ────────────────────────────────────────
 async function saveToCloud() {
-  if(!syncEnabled) return;
+  if (!syncEnabled) return;
   try {
-    showSyncStatus('Sincronizando...','syncing');
-    const docRef = doc(db,'cronogramas',userId);
-    await setDoc(docRef,{...e, lastUpdated:new Date().toISOString()});
-    showSyncStatus('Salvo na nuvem!','success');
-  } catch(error) {
-    console.error('Erro ao salvar:',error);
-    showSyncStatus('Erro ao sincronizar','error');
+    showSyncStatus('Sincronizando...', 'syncing');
+    const docRef = doc(db, 'cronogramas', userId);
+    await setDoc(docRef, {
+      ...e,
+      lastUpdated: new Date().toISOString()
+    });
+    showSyncStatus('Salvo na nuvem!', 'success');
+  } catch (error) {
+    console.error('Erro ao salvar:', error);
+    showSyncStatus('Erro ao sincronizar', 'error');
   }
   try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
 }
 
 async function loadFromCloud() {
   try {
-    showSyncStatus('Carregando da nuvem...','syncing');
-    const docRef = doc(db,'cronogramas',userId);
+    showSyncStatus('Carregando da nuvem...', 'syncing');
+    const docRef = doc(db, 'cronogramas', userId);
     const docSnap = await getDoc(docRef);
-    if(docSnap.exists()) {
+    
+    if (docSnap.exists()) {
       const data = docSnap.data();
-      e={...e,...data};
-      migrar();
+      e = {...e, ...data};
+      if (!e.titulos) e.titulos = {};
+      if (!e.dataReprogramacao) e.dataReprogramacao = null;
+      if (!e.cron.length) gen();
+      showSyncStatus('Carregado da nuvem!', 'success');
     } else {
-      gerarCronograma();
+      gen();
       await saveToCloud();
     }
-    isLoading=false;
+    isLoading = false;
     rend();
     setupRealtimeSync();
-    showSyncStatus('Carregado!','success');
-  } catch(error) {
-    console.error('Erro ao carregar:',error);
-    showSyncStatus('Erro ao carregar','error');
+  } catch (error) {
+    console.error('Erro ao carregar:', error);
+    showSyncStatus('Erro ao carregar', 'error');
     ld();
-    isLoading=false;
+    isLoading = false;
     rend();
   }
 }
 
 function setupRealtimeSync() {
-  if(unsubRealtime){unsubRealtime();unsubRealtime=null;}
-  const docRef=doc(db,'cronogramas',userId);
-  unsubRealtime=onSnapshot(docRef,(snap)=>{
-    if(snap.exists()&&!isLoading){
-      const data=snap.data();
-      const currentUpdate=e.lastUpdated||'';
-      const cloudUpdate=data.lastUpdated||'';
-      if(cloudUpdate>currentUpdate){
-        e={...e,...data};
-        migrar();
+  const docRef = doc(db, 'cronogramas', userId);
+  onSnapshot(docRef, (doc) => {
+    if (doc.exists() && !isLoading) {
+      const data = doc.data();
+      const currentUpdate = e.lastUpdated || '';
+      const cloudUpdate = data.lastUpdated || '';
+      if (cloudUpdate > currentUpdate) {
+        e = {...e, ...data};
         rend();
         ntf('🔄 Atualizado de outro dispositivo!');
       }
@@ -172,485 +156,264 @@ function setupRealtimeSync() {
   });
 }
 
-function sv(){saveToCloud();try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}}
+function sv(){
+  saveToCloud();
+  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
+}
+
 function ld(){
-  try{const s=localStorage.getItem('cron2');if(s)e={...e,...JSON.parse(s)};migrar();}catch{}
-  if(!e.cron||!e.cron.length)gerarCronograma();
+  try{
+    const s=localStorage.getItem('cron2');
+    if(s)e={...e,...JSON.parse(s)};
+    if(!e.titulos)e.titulos={};
+    if(!e.dataReprogramacao)e.dataReprogramacao=null;
+  }catch{}
+  if(!e.cron.length)gen()
 }
 
-// ── Migração de dados antigos ──────────────────────────
-function migrar() {
-  if(!e.cron)e.cron=[];
-  if(!e.sessoes)e.sessoes=[];
-  if(!e.revs)e.revs=[];
-  if(!e.stats)e.stats={a:0,d:0,r:0};
-  // migra formato antigo (dias) para novo (cron por matéria)
-  if(e.dias&&e.dias.length&&!e.cron.length){
-    gerarCronograma();
-    // recalcula progresso a partir dos dias antigos
-    e.dias.forEach(d=>{
-      const item=e.cron.find(c=>c.ma===d.ma);
-      if(item){item.aulasConcluidas=Math.min(item.aulasConcluidas+d.q,item.aulasTotal);}
-    });
-    e.cron.forEach(c=>{if(c.aulasConcluidas>=c.aulasTotal)c.concluido=true;});
-  }
-  e.cron.forEach(c=>{
-    if(c.deletado===undefined)c.deletado=false;
-    if(c.aulasConcluidas===undefined)c.aulasConcluidas=0;
-    if(c.concluido===undefined)c.concluido=false;
+function gen(){
+  const c=[];
+  let d=1,s=1,m=1;
+  const ordem=[
+    'Direito Penal – Parte Geral',
+    'Direito Penal – Parte Especial',
+    'Direito Processual Penal',
+    'Legislação Penal Especial',
+    'Direito Constitucional',
+    'Criminologia',
+    'Princípios Constitucionais',
+    'Direitos Humanos',
+    'Controle de Constitucionalidade',
+    'Direito Penal Militar',
+    'Execução Penal',
+    'Tribunal do Júri',
+    'Lei de Drogas',
+    'Português',
+    'Raciocínio Lógico',
+    'Raciocínio Lógico (Matemático)',
+    'Informática',
+    'Informática (Teoria e Exercícios)',
+    'Matemática'
+  ];
+  ordem.forEach(ma=>{
+    if(!mat[ma])return;
+    const t=mat[ma];
+    let a=1;
+    while(a<=t){
+      const f=Math.min(a+3,t);
+      c.push({d:d,s:s,m:m,ma:ma,i:a,f:f,q:f-a+1,c:false});
+      a=f+1;
+      d++;
+      if(d%4===1)s++;
+      if(d%16===1&&d>1)m++
+    }
   });
+  e.cron=c;
+  sv()
 }
 
-// ── Gera cronograma inicial ────────────────────────────
-function gerarCronograma() {
-  e.cron=Object.entries(mat).map(([ma,total],i)=>({
-    id:'c'+i, ma, aulasTotal:total, aulasConcluidas:0, concluido:false, deletado:false
-  }));
-}
-
-// ── Notificações ───────────────────────────────────────
 function ntf(msg,tp='ok'){
   const cor={ok:'bg-green-500',er:'bg-red-500',warn:'bg-yellow-500'};
   const dv=document.createElement('div');
-  dv.className=`${cor[tp]||cor.ok} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
+  dv.className=`${cor[tp]} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
   dv.textContent=msg;
   document.getElementById('n').appendChild(dv);
-  setTimeout(()=>dv.remove(),3000);
+  setTimeout(()=>dv.remove(),3000)
 }
 
-// ── Data helpers ───────────────────────────────────────
-function hoje(){const h=new Date();h.setHours(0,0,0,0);return h;}
-function fmtDMY(d){return d.toLocaleDateString('pt-BR');}
-function parseDMY(s){const[d,m,y]=s.split('/');return new Date(+y,+m-1,+d);}
-function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
-function cmpDMY(a,b){return parseDMY(a)-parseDMY(b);}
-
-// ── Revisões: máx 2 por dia ────────────────────────────
-function gerarRevisoes(sessao, data1rev) {
-  const intervalos=[
-    {tipo:'1ª revisão',dias:0},
-    {tipo:'2ª revisão',dias:7},
-    {tipo:'3ª revisão',dias:23},
-    {tipo:'4ª revisão',dias:53}
-  ];
-  const cnt={};
-  e.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
-
-  intervalos.forEach(({tipo,dias})=>{
-    let d=addDays(data1rev,dias);
-    for(let i=0;i<365;i++){
-      const k=fmtDMY(d);
-      if((cnt[k]||0)<2){
-        cnt[k]=(cnt[k]||0)+1;
-        e.revs.push({
-          id:`r${Date.now()}_${tipo}_${Math.random().toString(36).substr(2,4)}`,
-          sessaoId:sessao.id,ma:sessao.ma,de:sessao.de,ate:sessao.ate,
-          qtd:sessao.qtd,notas:sessao.notas,dr:k,tipo,s:'p'
-        });
-        break;
-      }
-      d=addDays(d,1);
-    }
-  });
+function dt(ds){
+  const h=new Date();
+  h.setDate(h.getDate()+ds);
+  return h.toLocaleDateString('pt-BR')
 }
 
-// ── Reorganizar atrasos ────────────────────────────────
-function reorganizarAtrasos(){
-  const hj=hoje();
-  const atrasadas=e.revs.filter(r=>r.s==='p'&&parseDMY(r.dr)<hj).sort((a,b)=>cmpDMY(a.dr,b.dr));
-  if(!atrasadas.length){ntf('✅ Nenhum atraso!');return;}
-  const cnt={};
-  e.revs.filter(r=>r.s==='p'&&parseDMY(r.dr)>=hj).forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
-  atrasadas.forEach(r=>{
-    let d=new Date(hj);
-    for(let i=0;i<365;i++){
-      const k=fmtDMY(d);
-      if((cnt[k]||0)<2){cnt[k]=(cnt[k]||0)+1;r.dr=k;break;}
-      d=addDays(d,1);
-    }
-  });
-  sv();rend();
-  ntf(`🔄 ${atrasadas.length} revisão(ões) redistribuída(s)!`);
+function getStatus(dia,completo){
+  if(completo)return 'completo';
+  const hoje=new Date();
+  hoje.setHours(0,0,0,0);
+  const dataInicio = e.dataReprogramacao ? new Date(e.dataReprogramacao) : new Date(2026,0,6);
+  const diasPassados=Math.floor((hoje-dataInicio)/(1000*60*60*24));
+  const diaEsperado=Math.ceil(diasPassados/1.75);
+  return dia<=diaEsperado?'atrasado':'pendente'
 }
 
-// ── Registrar estudo ───────────────────────────────────
-function registrarEstudo(cronId){
-  const item=e.cron.find(c=>c.id===cronId);
-  if(!item)return;
-  const restante=item.aulasTotal-item.aulasConcluidas;
-  const d1=fmtDMY(addDays(hoje(),7));
-  const[dd,mm,yy]=d1.split('/');
-  abrirModal(`
-    <h3 class="text-lg font-bold mb-1">✅ Registrar estudo</h3>
-    <p class="text-sm font-semibold text-gray-700 mb-1">${item.ma}</p>
-    <p class="text-xs text-gray-400 mb-4">${item.aulasConcluidas}/${item.aulasTotal} aulas • ${restante} restantes</p>
-    <label class="block text-sm font-semibold mb-1">Quantas aulas você estudou?</label>
-    <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
-    <label class="block text-sm font-semibold mb-1">📅 Data da 1ª revisão</label>
-    <input id="m-data1" type="date" value="${yy}-${mm}-${dd}"
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-4 focus:border-indigo-500 focus:outline-none">
-    <label class="block text-sm font-semibold mb-1">📝 Anotações (opcional)</label>
-    <textarea id="m-notas" placeholder="Títulos das aulas, pontos importantes..."
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none"></textarea>
-    <div class="flex gap-3">
-      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-      <button onclick="confirmarRegistro('${cronId}')" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
-    </div>`);
+function reprogramarAtrasados(){
+  const hoje = new Date();
+  hoje.setHours(0,0,0,0);
+  const primeiroPendente = e.cron.find(d => !d.c);
+  if (!primeiroPendente) {
+    ntf('✅ Não há dias pendentes para reprogramar!', 'ok');
+    return;
+  }
+  const status = getStatus(primeiroPendente.d, false);
+  if (status !== 'atrasado') {
+    ntf('✅ Você não tem aulas atrasadas!', 'ok');
+    return;
+  }
+  const confirmar = confirm(
+    `🔄 REPROGRAMAR CRONOGRAMA\n\nPrimeiro dia pendente: Dia ${primeiroPendente.d}\nIsso ajustará a data base para considerar que você está começando hoje.\n\nDeseja continuar?`
+  );
+  if (!confirmar) return;
+  e.dataReprogramacao = hoje.toISOString();
+  sv();
+  rend();
+  ntf('🎉 Cronograma reprogramado com sucesso!', 'ok');
+  ntf(`📅 Nova data base: ${hoje.toLocaleDateString('pt-BR')}`, 'ok');
 }
 
-function confirmarRegistro(cronId){
-  const item=e.cron.find(c=>c.id===cronId);
-  if(!item)return;
-  const restante=item.aulasTotal-item.aulasConcluidas;
-  const qtd=Math.max(1,Math.min(restante,parseInt(document.getElementById('m-qtd').value)||1));
-  const dataStr=document.getElementById('m-data1').value;
-  const notas=document.getElementById('m-notas').value.trim();
-  if(!dataStr){ntf('Informe a data da 1ª revisão','er');return;}
-  const[y,m,d]=dataStr.split('-');
-  const data1=new Date(+y,+m-1,+d);
-  const de=item.aulasConcluidas+1;
-  const ate=item.aulasConcluidas+qtd;
-  const sessao={id:'s'+Date.now(),dt:fmtDMY(hoje()),cronId,ma:item.ma,de,ate,qtd,notas};
-  e.sessoes.push(sessao);
-  item.aulasConcluidas+=qtd;
-  if(item.aulasConcluidas>=item.aulasTotal)item.concluido=true;
-  e.stats.a+=qtd;
+function salvarTitulo(dia,val){
+  e.titulos[dia]=val;
+  sv();
+  ntf('💾 Título salvo!')
+}
+
+function cDia(idx){
+  const d=e.cron[idx];
+  const titulo=e.titulos[d.d]||'';
+  const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:d.ma,i:d.i,f:d.f,q:d.q,titulo:titulo};
+  e.dias.push(ds);
+  e.stats.a+=d.q;
   e.stats.d++;
-  gerarRevisoes(sessao,data1);
-  fecharModal();
-  sv();rend();
-  ntf(`🎉 +${qtd} aula(s) em ${item.ma}!`);
+  e.cron[idx].c=true;
+  [{t:'7d',ds:7,cor:'amber'},{t:'14d',ds:14,cor:'orange'},{t:'30d',ds:30,cor:'purple'},{t:'60d',ds:60,cor:'blue'}].forEach(r=>{
+    e.revs.push({id:`${ds.id}-${r.t}`,di:ds.id,ma:d.ma,i:d.i,f:d.f,q:d.q,titulo:titulo,dr:dt(r.ds),t:r.t,s:'p',cor:r.cor})
+  });
+  sv();
+  rend();
+  ntf(`🎉 Dia ${d.d} OK!`)
 }
 
-// ── Excluir matéria ────────────────────────────────────
-function excluirMateria(cronId){
-  const item=e.cron.find(c=>c.id===cronId);
-  if(!item)return;
-  abrirModal(`
-    <h3 class="text-lg font-bold mb-3">🗑️ Excluir matéria</h3>
-    <p class="text-sm text-gray-600 mb-5">Remover <strong>${item.ma}</strong> do cronograma?</p>
-    <div class="flex gap-3">
-      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button onclick="confirmarExcluir('${cronId}')" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold hover:bg-red-600">Excluir</button>
-    </div>`);
-}
-
-function confirmarExcluir(cronId){
-  const item=e.cron.find(c=>c.id===cronId);
-  if(!item)return;
-  item.deletado=true;
-  fecharModal();sv();rend();
-  ntf('🗑️ Matéria removida');
-}
-
-// ── Revisões: marcar / editar data ────────────────────
 function mkR(id){
   const r=e.revs.find(x=>x.id===id);
-  if(!r)return;
-  r.s='c';e.stats.r++;
-  sv();rend();ntf('✅ Revisão OK!');
+  if(r){
+    r.s='c';
+    e.stats.r++;
+    sv();
+    rend();
+    ntf('✅ Revisão OK!')
+  }
 }
 
 function editData(id){
   const r=e.revs.find(x=>x.id===id);
   if(!r)return;
-  const[dd,mm,yy]=r.dr.split('/');
-  abrirModal(`
-    <h3 class="text-lg font-bold mb-2">📅 Alterar data da revisão</h3>
-    <p class="text-sm text-gray-500 mb-4">${r.ma} · ${r.tipo}</p>
-    <input id="m-nd" type="date" value="${yy}-${mm}-${dd}"
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 focus:border-indigo-500 focus:outline-none">
-    <div class="flex gap-3">
-      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button onclick="confirmarEditData('${id}')" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Salvar</button>
-    </div>`);
+  const novaData=prompt('📅 Nova data da revisão (dd/mm/aaaa):',r.dr);
+  if(novaData&&/^\d{2}\/\d{2}\/\d{4}$/.test(novaData)){
+    r.dr=novaData;
+    sv();
+    rend();
+    ntf('📅 Data atualizada!')
+  }else if(novaData){
+    ntf('❌ Formato inválido! Use dd/mm/aaaa','er')
+  }
 }
 
-function confirmarEditData(id){
-  const r=e.revs.find(x=>x.id===id);
-  if(!r)return;
-  const v=document.getElementById('m-nd').value;
-  if(!v)return;
-  const[yy,mm,dd]=v.split('-');
-  r.dr=`${dd}/${mm}/${yy}`;
-  fecharModal();sv();rend();ntf('📅 Data atualizada!');
-}
-
-// ── Exportar / Importar / Resetar ─────────────────────
 function exp(){
   const b=new Blob([JSON.stringify(e,null,2)],{type:'application/json'});
   const u=URL.createObjectURL(b);
   const a=document.createElement('a');
-  a.href=u;a.download=`backup-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();URL.revokeObjectURL(u);ntf('💾 Exportado!');
+  a.href=u;
+  a.download=`backup-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(u);
+  ntf('💾 Exportado!')
 }
 
 function imp(ev){
-  const f=ev.target.files[0];if(!f)return;
+  const f=ev.target.files[0];
+  if(!f)return;
   const r=new FileReader();
   r.onload=x=>{
-    try{e={...e,...JSON.parse(x.target.result)};migrar();sv();rend();ntf('📥 Importado!');}
-    catch{ntf('❌ Erro','er');}
-  };r.readAsText(f);
+    try{
+      e={...e,...JSON.parse(x.target.result)};
+      if(!e.titulos)e.titulos={};
+      if(!e.dataReprogramacao)e.dataReprogramacao=null;
+      sv();
+      rend();
+      ntf('📥 Importado!')
+    }catch{
+      ntf('❌ Erro','er')
+    }
+  };
+  r.readAsText(f)
 }
 
 function rst(){
-  abrirModal(`
-    <h3 class="text-lg font-bold mb-3">⚠️ Resetar tudo</h3>
-    <p class="text-sm text-gray-600 mb-5">Apaga todo o progresso (nuvem e local). Não pode ser desfeito.</p>
-    <div class="flex gap-3">
-      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Cancelar</button>
-      <button onclick="confirmarReset()" class="flex-1 bg-red-500 text-white rounded-lg py-2.5 font-semibold">Resetar</button>
-    </div>`);
+  if(confirm('⚠️ Resetar tudo? Isto apagará os dados da nuvem também!')){
+    saveToCloud().then(() => {
+      localStorage.removeItem('cron2');
+      location.reload()
+    })
+  }
 }
 
-window.confirmarReset=function(){
-  fecharModal();
-  e={aba:'plano',cron:[],sessoes:[],revs:[],stats:{a:0,d:0,r:0}};
-  gerarCronograma();
-  sv();rend();ntf('🔄 Resetado!');
-};
-
-// ── Trocar ID ──────────────────────────────────────────
-function showUserId(){
-  abrirModal(`
-    <h3 class="text-lg font-bold mb-2">🆔 ID de usuário</h3>
-    <p class="text-sm text-gray-500 mb-2">Use este ID em outro dispositivo para acessar seus dados.</p>
-    <div class="bg-gray-100 rounded-lg p-3 font-mono text-xs break-all select-all mb-4">${userId}</div>
-    <label class="block text-sm font-semibold mb-1">Trocar para outro ID:</label>
-    <input id="m-nid" type="text" placeholder="Cole o ID aqui..."
-      class="w-full border-2 border-gray-200 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none">
-    <div class="flex gap-3">
-      <button onclick="fecharModal()" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Fechar</button>
-      <button onclick="trocarId()" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold">Trocar ID</button>
-    </div>`);
+function showUserId() {
+  const newId = prompt('🆔 Seu ID de usuário (copie para usar em outro dispositivo):', userId);
+  if (newId && newId !== userId && confirm('Deseja trocar para este ID? Isso carregará os dados desse usuário.')) {
+    userId = newId;
+    localStorage.setItem('userId', userId);
+    location.reload();
+  }
 }
 
-function trocarId(){
-  const nv=document.getElementById('m-nid').value.trim();
-  if(!nv){ntf('Digite um ID','er');return;}
-  if(nv===userId){ntf('Já está usando este ID','warn');return;}
-  fecharModal();
-  // Para o listener atual
-  if(unsubRealtime){unsubRealtime();unsubRealtime=null;}
-  // Atualiza userId
-  userId=nv;
-  localStorage.setItem('userId',nv);
-  localStorage.removeItem('cron2');
-  // Reseta estado e recarrega
-  e={aba:'plano',cron:[],sessoes:[],revs:[],stats:{a:0,d:0,r:0}};
-  isLoading=true;
-  ntf('🔄 Carregando novo ID...','warn');
-  loadFromCloud();
-}
-
-// ── Render ─────────────────────────────────────────────
 function rend(){
-  expor();
-  const hj=hoje();
-  const totalAulas=e.cron.filter(c=>!c.deletado).reduce((s,c)=>s+c.aulasTotal,0);
-  const pg=totalAulas?(e.stats.a/totalAulas*100).toFixed(1):'0.0';
   const pd=e.revs.filter(x=>x.s==='p').length;
-  const temAtrasados=e.revs.some(r=>r.s==='p'&&parseDMY(r.dr)<hj);
-  const ativas=e.cron.filter(c=>!c.deletado&&!c.concluido);
-  const concluidas=e.cron.filter(c=>!c.deletado&&c.concluido);
-
+  const ta=Object.values(mat).reduce((s,v)=>s+v,0);
+  const pg=(e.stats.a/ta*100).toFixed(1);
+  const ms=e.cron.reduce((ac,d)=>{if(!ac[d.m])ac[d.m]=[];ac[d.m].push(d);return ac},{});
+  const mn=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  
+  const temAtrasados = e.cron.some(d => !d.c && getStatus(d.d, false) === 'atrasado');
+  
   document.getElementById('app').innerHTML=`
 <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-  <div class="flex justify-between items-start gap-4 mb-6 flex-wrap">
-    <div>
-      <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
-      <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
-      <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,16)}...</button>
-    </div>
-    <div class="flex gap-2 flex-wrap">
-      ${temAtrasados?`<button onclick="reorganizarAtrasos()" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 text-sm font-bold shadow-lg">🔄 Reorganizar Atrasos</button>`:''}
-      <button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
-      <label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
-      <button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
-    </div>
-  </div>
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    <div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl">
-      <p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p>
-      <p class="text-3xl font-bold text-indigo-700">${e.stats.a}</p>
-      <p class="text-xs text-indigo-600">de ${totalAulas}</p>
-    </div>
-    <div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl">
-      <p class="text-sm font-bold text-green-900 mb-1">📊 Progresso</p>
-      <p class="text-3xl font-bold text-green-700">${pg}%</p>
-    </div>
-    <div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl">
-      <p class="text-sm font-bold text-purple-900 mb-1">📖 Matérias</p>
-      <p class="text-3xl font-bold text-purple-700">${concluidas.length}</p>
-      <p class="text-xs text-purple-600">de ${ativas.length+concluidas.length} concluídas</p>
-    </div>
-    <div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl">
-      <p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p>
-      <p class="text-3xl font-bold text-orange-700">${pd}</p>
-      <p class="text-xs text-orange-600">${e.stats.r} completas</p>
-    </div>
-  </div>
+<div class="flex justify-between items-start gap-4 mb-6 flex-wrap">
+<div>
+  <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
+  <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
+  <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,12)}...</button>
+  ${e.dataReprogramacao ? `<p class="text-xs text-purple-600 mt-1">🔄 Reprogramado em: ${new Date(e.dataReprogramacao).toLocaleDateString('pt-BR')}</p>` : ''}
 </div>
-
+<div class="flex gap-2 flex-wrap">
+${temAtrasados ? `<button onclick="reprogramarAtrasados()" class="bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 text-sm font-bold shadow-lg animate-pulse">🔄 Reprogramar Atrasados</button>` : ''}
+<button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
+<label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
+<button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
+</div>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl"><p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p><p class="text-3xl font-bold text-indigo-700">${e.stats.a}</p><p class="text-xs text-indigo-600">de ${ta}</p></div>
+<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">📅 Dias</p><p class="text-3xl font-bold text-green-700">${e.stats.d}</p><p class="text-xs text-green-600">de ${e.cron.length}</p></div>
+<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📊 Progresso</p><p class="text-3xl font-bold text-purple-700">${pg}%</p></div>
+<div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p><p class="text-3xl font-bold text-orange-700">${pd}</p><p class="text-xs text-orange-600">${e.stats.r} completas</p></div>
+</div>
+</div>
 <div class="bg-white rounded-t-2xl shadow-xl">
-  <div class="flex border-b overflow-x-auto">
-    <button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
-    <button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">
-      🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">${pd}</span>`:''}
-    </button>
-    <button onclick="e.aba='hist';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='hist'?'tab-active':'text-gray-600 hover:text-gray-800'}">📈 Histórico</button>
-  </div>
+<div class="flex border-b overflow-x-auto">
+<button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
+<button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
+</div>
+</div>
+<div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
+${e.aba==='plano'?`<div><h2 class="text-2xl font-bold mb-4">📋 Plano 2026</h2><p class="text-sm text-gray-600 mb-6 bg-indigo-50 border-2 border-indigo-200 p-3 rounded-lg"><strong>${e.cron.length} dias</strong> • 4 aulas/dia • 4 dias/semana</p>${Object.keys(ms).map(m=>{const dm=ms[m];const co=dm.filter(x=>x.c).length;const pr=(co/dm.length*100).toFixed(0);return`<div class="mb-8"><div class="flex justify-between items-center mb-3 flex-wrap gap-2"><h3 class="text-xl font-bold">📅 ${mn[m-1]} 2026</h3><div class="flex items-center gap-3"><span class="text-sm text-gray-600">${co}/${dm.length}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg font-bold">${pr}%</span></div></div><div class="w-full bg-gray-200 rounded-full h-2 mb-4"><div class="bg-gradient-to-r from-indigo-500 to-purple-600 h-2 rounded-full transition-all" style="width:${pr}%"></div></div><div class="grid md:grid-cols-2 gap-3">${dm.map(d=>{const ix=e.cron.findIndex(x=>x.d===d.d&&x.ma===d.ma);const tit=e.titulos[d.d]||'';const status=getStatus(d.d,d.c);const cores={pendente:{border:'border-yellow-300',bg:'bg-yellow-50',btn:'bg-yellow-500 hover:bg-yellow-600'},completo:{border:'border-green-300',bg:'bg-green-50',btn:'bg-green-500'},atrasado:{border:'border-red-300',bg:'bg-red-50',btn:'bg-red-500 hover:bg-red-600'}};const cor=cores[status];return`<div class="border-2 ${cor.border} ${cor.bg} rounded-xl p-4 hover:shadow-lg transition-all"><div class="flex justify-between gap-3 mb-3"><div class="flex-1 min-w-0"><div class="flex gap-2 mb-2 flex-wrap"><span class="bg-indigo-600 text-white px-2 py-1 rounded text-xs font-bold">Dia ${d.d}</span><span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">Sem ${d.s}</span>${status==='atrasado'?'<span class="bg-red-600 text-white px-2 py-1 rounded text-xs font-bold animate-pulse">⚠️ Atrasado</span>':''}</div><h4 class="font-bold text-gray-800 mb-2 ${d.c?'line-through opacity-60':''} break-words">${d.ma}</h4><div class="flex gap-2 text-xs flex-wrap"><span class="bg-blue-100 text-blue-700 px-2 py-1 rounded">📚 ${d.i}-${d.f}</span><span class="bg-purple-100 text-purple-700 px-2 py-1 rounded font-bold">${d.q} aulas</span></div></div>${!d.c?`<button onclick="cDia(${ix})" class="${cor.btn} text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">✅ OK</button>`:`<span class="bg-green-500 text-white px-4 py-2.5 rounded-lg text-sm font-bold flex items-center gap-1 whitespace-nowrap flex-shrink-0">✓ Feito</span>`}</div><div class="mt-3 pt-3 border-t ${status==='completo'?'border-green-200':'border-gray-200'}"><label class="block text-xs font-bold text-gray-700 mb-1">📝 Títulos das aulas:</label><textarea class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none ${d.c?'bg-gray-50 opacity-60':''}" placeholder="Ex: Princípios do Direito Penal" onchange="salvarTitulo(${d.d},this.value)" ${d.c?'disabled':''}>${tit}</textarea></div></div>`}).join('')}</div></div>`}).join('')}</div>`:''}
+${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data</h2>${e.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete dias no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${e.revs.filter(x=>x.s==='p').length})</h3>${e.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${e.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-900 mb-1">📝 Títulos das aulas:</p><p class="text-sm text-blue-800 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${e.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${e.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${e.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div>${r.titulo?`<div class="bg-gray-100 rounded p-2 mt-2 text-xs text-gray-600 whitespace-pre-wrap">${r.titulo}</div>`:''}</div>`).join('')}</div></div>`:''}`}</div>`:''}
 </div>
 
-<div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
-  ${e.aba==='plano'?renderPlano(ativas,concluidas):''}
-  ${e.aba==='revs'?renderRevisoes():''}
-  ${e.aba==='hist'?renderHistorico():''}
-</div>`;
-  expor();
+`;
+
+  window.cDia = cDia;
+  window.mkR = mkR;
+  window.editData = editData;
+  window.salvarTitulo = salvarTitulo;
+  window.exp = exp;
+  window.imp = imp;
+  window.rst = rst;
+  window.showUserId = showUserId;
+  window.reprogramarAtrasados = reprogramarAtrasados;
+  window.e = e;
+  window.rend = rend;
 }
 
-// ── Render Plano ───────────────────────────────────────
-function renderPlano(ativas,concluidas){
-  return `
-    <h2 class="text-2xl font-bold mb-4">📋 Plano de Estudo</h2>
-
-    <div class="mb-8">
-      <h3 class="text-lg font-bold text-gray-700 mb-3 flex items-center gap-2">
-        <span class="w-3 h-3 rounded-full bg-indigo-500 inline-block"></span>
-        Em andamento (${ativas.length})
-      </h3>
-      ${ativas.length===0
-        ?'<div class="text-center py-12 text-gray-400"><p class="text-4xl mb-2">🎉</p><p>Todas concluídas!</p></div>'
-        :`<div class="grid md:grid-cols-2 gap-3">${ativas.map(c=>cardMateria(c,false)).join('')}</div>`}
-    </div>
-
-    ${concluidas.length>0?`
-    <details>
-      <summary class="text-lg font-bold text-gray-700 mb-3 flex items-center gap-2 cursor-pointer select-none list-none">
-        <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span>
-        Concluídas (${concluidas.length}) ▼
-      </summary>
-      <div class="grid md:grid-cols-2 gap-3 mt-4">
-        ${concluidas.map(c=>cardMateria(c,true)).join('')}
-      </div>
-    </details>`:''}`;
-}
-
-function cardMateria(c,done){
-  const pct=c.aulasTotal?Math.round(c.aulasConcluidas/c.aulasTotal*100):0;
-  const sessoesMat=(e.sessoes||[]).filter(s=>s.cronId===c.id).length;
-  const border=done?'border-green-200 bg-green-50':'border-gray-200 bg-white';
-  return `
-    <div class="border-2 ${border} rounded-xl p-4 hover:shadow-lg transition-all">
-      <div class="flex justify-between items-start gap-3 mb-3">
-        <div class="flex-1 min-w-0">
-          <h4 class="font-bold text-gray-800 ${done?'line-through opacity-60':''} break-words">${c.ma}</h4>
-          <p class="text-xs text-gray-400 mt-1">${c.aulasConcluidas}/${c.aulasTotal} aulas · ${sessoesMat} sessão(ões)</p>
-        </div>
-        <div class="flex gap-1.5 flex-shrink-0">
-          ${!done?`<button onclick="registrarEstudo('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">+ Estudei</button>`:''}
-          <button onclick="excluirMateria('${c.id}')" class="bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-xs font-bold" title="Excluir">🗑️</button>
-        </div>
-      </div>
-      <div class="bg-gray-200 rounded-full h-2 mb-1">
-        <div class="${done?'bg-green-500':'bg-indigo-500'} h-2 rounded-full transition-all" style="width:${pct}%"></div>
-      </div>
-      <div class="flex justify-between text-xs text-gray-400">
-        <span>${pct}% concluído</span>
-        <span>${c.aulasTotal-c.aulasConcluidas} restantes</span>
-      </div>
-    </div>`;
-}
-
-// ── Render Revisões ────────────────────────────────────
-function renderRevisoes(){
-  const hj=hoje();
-  const hjStr=fmtDMY(hj);
-  const pend=e.revs.filter(r=>r.s==='p').sort((a,b)=>cmpDMY(a.dr,b.dr));
-  const conc=e.revs.filter(r=>r.s==='c').sort((a,b)=>cmpDMY(b.dr,a.dr));
-  const atrasadas=pend.filter(r=>parseDMY(r.dr)<hj);
-  const hoje_=pend.filter(r=>r.dr===hjStr);
-  const futuras=pend.filter(r=>parseDMY(r.dr)>hj);
-
-  function cardRev(r,destaque){
-    const corBorder=destaque==='red'?'border-red-200 bg-red-50':'border-gray-200 bg-white';
-    return `
-      <div class="border-2 ${corBorder} rounded-xl p-4 hover:shadow-lg transition-all mb-3">
-        <div class="flex justify-between items-start gap-3">
-          <div class="flex-1 min-w-0">
-            <div class="flex gap-2 mb-2 flex-wrap">
-              <span class="bg-indigo-100 text-indigo-700 px-2 py-1 rounded text-xs font-bold">${r.tipo}</span>
-              <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">Aulas ${r.de}–${r.ate}</span>
-              ${destaque==='red'?'<span class="bg-red-500 text-white px-2 py-1 rounded text-xs font-bold">⚠️ Atrasada</span>':''}
-            </div>
-            <h4 class="font-bold text-gray-800 mb-1">${r.ma}</h4>
-            <div class="flex items-center gap-2">
-              <span class="text-sm text-gray-500">📅 ${r.dr}</span>
-              <button onclick="editData('${r.id}')" class="text-xs text-indigo-500 hover:underline">✏️ editar</button>
-            </div>
-            ${r.notas?`<div class="mt-2 bg-blue-50 border border-blue-200 rounded p-2 text-xs text-blue-800 whitespace-pre-wrap">${r.notas}</div>`:''}
-          </div>
-          <button onclick="mkR('${r.id}')" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-bold text-sm flex-shrink-0">✓ Feita</button>
-        </div>
-      </div>`;
-  }
-
-  function secao(titulo,lista,dest){
-    if(!lista.length)return'';
-    return`<div class="mb-6"><h3 class="text-lg font-bold text-gray-700 mb-3">${titulo} (${lista.length})</h3>${lista.map(r=>cardRev(r,dest)).join('')}</div>`;
-  }
-
-  if(!pend.length&&!conc.length)
-    return`<div class="text-center py-16"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete dias no Plano!</p></div>`;
-
-  return`
-    ${secao('⚠️ Atrasadas',atrasadas,'red')}
-    ${secao('📅 Hoje',hoje_,'today')}
-    ${secao('📆 Próximas',futuras,'future')}
-    ${conc.length?`
-    <details class="mt-4">
-      <summary class="text-lg font-bold text-green-700 cursor-pointer select-none list-none">✅ Concluídas (${conc.length}) ▼</summary>
-      <div class="max-h-80 overflow-y-auto mt-3 space-y-2">
-        ${conc.map(r=>`
-          <div class="border border-green-200 bg-green-50 rounded-xl p-3 opacity-75">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs">${r.tipo}</span>
-              <strong class="text-sm">${r.dr}</strong>
-            </div>
-            <p class="font-bold line-through text-gray-600">${r.ma}</p>
-            <p class="text-xs text-gray-400 mt-1">Aulas ${r.de}–${r.ate}</p>
-          </div>`).join('')}
-      </div>
-    </details>`:''}`;
-}
-
-// ── Render Histórico ───────────────────────────────────
-function renderHistorico(){
-  if(!e.sessoes||!e.sessoes.length)
-    return`<div class="text-center py-16"><span class="text-6xl block mb-3">📈</span><p class="text-gray-500 text-lg">Nenhuma sessão registrada</p></div>`;
-  const sorted=[...e.sessoes].sort((a,b)=>b.id.localeCompare(a.id));
-  return`
-    <h2 class="text-2xl font-bold mb-4">📈 Histórico (${e.sessoes.length} sessões)</h2>
-    <div class="space-y-2">
-      ${sorted.map(s=>`
-        <div class="border border-gray-200 rounded-xl p-4 bg-white hover:shadow transition-all">
-          <div class="flex justify-between items-start gap-3">
-            <div>
-              <p class="font-bold text-gray-800">${s.ma}</p>
-              <p class="text-xs text-gray-400 mt-1">📅 ${s.dt} · Aulas ${s.de}–${s.ate} · ${s.qtd} aula(s)</p>
-              ${s.notas?`<p class="text-xs text-gray-500 mt-1.5 whitespace-pre-wrap">${s.notas}</p>`:''}
-            </div>
-            <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex-shrink-0">${s.qtd} aulas</span>
-          </div>
-        </div>`).join('')}
-    </div>`;
-}
-
-// ── Inicia ─────────────────────────────────────────────
-expor();
 loadFromCloud();
 </script>
 </body>
