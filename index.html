@@ -47,9 +47,10 @@ if (!userId) {
   localStorage.setItem('userId', userId);
 }
 
-// Estado: agora cron é por MATÉRIA, não por dia
+// Estado: cron é por MATÉRIA, questoes é por registro (matéria + data + quantidade)
 // cron: [{ id, ma, aulasTotal, aulasConcluidas, concluido }]
-let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{},dataReprogramacao:null};
+// questoes: [{ id, ma, data, qtd }]
+let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{},dataReprogramacao:null,questoes:[]};
 let syncEnabled = true;
 let isLoading = true;
 
@@ -109,6 +110,7 @@ async function loadFromCloud() {
       e = {...e,...data};
       if(!e.titulos) e.titulos={};
       if(!e.dataReprogramacao) e.dataReprogramacao=null;
+      if(!e.questoes) e.questoes=[];
       if(!e.cron.length) gen();
       showSyncStatus('Carregado da nuvem!','success');
     } else {
@@ -154,6 +156,7 @@ function ld(){
     if(s) e={...e,...JSON.parse(s)};
     if(!e.titulos) e.titulos={};
     if(!e.dataReprogramacao) e.dataReprogramacao=null;
+    if(!e.questoes) e.questoes=[];
   }catch{}
   if(!e.cron.length) gen();
 }
@@ -313,6 +316,120 @@ function editData(id){
   }
 }
 
+// ===== QUESTÕES =====
+
+// Abre modal para registrar quantidade de questões resolvidas numa matéria/data
+function registrarQuestoes(ma){
+  const hoje=new Date();
+  const hojeISO = hoje.getFullYear()+'-'+String(hoje.getMonth()+1).padStart(2,'0')+'-'+String(hoje.getDate()).padStart(2,'0');
+
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade">
+        <h3 class="text-lg font-bold mb-1">✍️ Registrar questões</h3>
+        <p class="text-sm text-gray-500 mb-4">${ma}</p>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Quantas questões você resolveu?</label>
+        <input id="q-qtd" type="number" min="1" value="10"
+          class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold mb-4 focus:border-purple-500 focus:outline-none">
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data</label>
+        <input id="q-data" type="date" value="${hojeISO}"
+          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-5 focus:border-purple-500 focus:outline-none">
+
+        <div class="flex gap-3">
+          <button id="q-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="q-confirmar" class="flex-1 bg-purple-600 text-white rounded-lg py-2.5 font-semibold hover:bg-purple-700">Confirmar</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('q-cancelar').onclick = () => {
+    document.getElementById('modal-root').innerHTML = '';
+  };
+
+  document.getElementById('q-confirmar').onclick = () => {
+    const qtd = parseInt(document.getElementById('q-qtd').value)||0;
+    const dataStr = document.getElementById('q-data').value;
+    if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de questões','er');return;}
+    if(!dataStr){ntf('❌ Informe a data','er');return;}
+    const [y,m,d] = dataStr.split('-');
+    const dataFmt = `${d}/${m}/${y}`;
+    e.questoes.push({id:Date.now(),ma,data:dataFmt,qtd});
+    document.getElementById('modal-root').innerHTML = '';
+    sv();rend();
+    ntf(`🎉 +${qtd} questões em ${ma}!`);
+  };
+}
+
+function delQuestao(id){
+  if(!confirm('Remover este registro?')) return;
+  e.questoes = e.questoes.filter(q=>q.id!==id);
+  sv();rend();
+  ntf('🗑️ Removido');
+}
+
+function diasAtras(n){
+  const arr=[];
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  for(let i=n-1;i>=0;i--) arr.push(fmtDMY(addDias(hoje,-i)));
+  return arr;
+}
+
+function questoesPorDia(n=14){
+  const dias=diasAtras(n);
+  const mapa={};
+  e.questoes.forEach(q=>{mapa[q.data]=(mapa[q.data]||0)+q.qtd;});
+  return dias.map(d=>({data:d,qtd:mapa[d]||0}));
+}
+
+function questoesHoje(){
+  const hj=fmtDMY(new Date());
+  return e.questoes.filter(q=>q.data===hj).reduce((s,q)=>s+q.qtd,0);
+}
+function questoesSemana(){
+  const dias=diasAtras(7);
+  return e.questoes.filter(q=>dias.includes(q.data)).reduce((s,q)=>s+q.qtd,0);
+}
+function questoesMes(){
+  const dias=diasAtras(30);
+  return e.questoes.filter(q=>dias.includes(q.data)).reduce((s,q)=>s+q.qtd,0);
+}
+function questoesTotal(){
+  return e.questoes.reduce((s,q)=>s+q.qtd,0);
+}
+function questoesPorMateria(){
+  const mapa={};
+  e.questoes.forEach(q=>{mapa[q.ma]=(mapa[q.ma]||0)+q.qtd;});
+  return Object.keys(mat).map(ma=>({ma,qtd:mapa[ma]||0})).sort((a,b)=>b.qtd-a.qtd);
+}
+function mediaDiariaSemana(){
+  return (questoesSemana()/7).toFixed(1);
+}
+
+// Gráfico de barras (SVG) das últimas N dias
+function svgChartDias(n=14){
+  const dados=questoesPorDia(n);
+  const max=Math.max(...dados.map(d=>d.qtd),1);
+  const w=760,h=190,padB=34,padT=20,padL=10,padR=10;
+  const areaW=w-padL-padR;
+  const bw=areaW/dados.length;
+  const bars=dados.map((d,i)=>{
+    const bh=max>0?(d.qtd/max)*(h-padT-padB):0;
+    const x=padL+i*bw+bw*0.15;
+    const bwReal=bw*0.7;
+    const y=h-padB-bh;
+    const [dd,mm]=d.data.split('/');
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bwReal.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="#7c3aed"/>
+    ${d.qtd>0?`<text x="${(x+bwReal/2).toFixed(1)}" y="${(y-4).toFixed(1)}" font-size="10" text-anchor="middle" fill="#374151" font-weight="bold">${d.qtd}</text>`:''}
+    <text x="${(x+bwReal/2).toFixed(1)}" y="${h-padB+14}" font-size="9" text-anchor="middle" fill="#6b7280">${dd}/${mm}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" class="w-full">
+    <line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="#e5e7eb"/>
+    ${bars}
+  </svg>`;
+}
+
 function exp(){
   const b=new Blob([JSON.stringify(e,null,2)],{type:'application/json'});
   const u=URL.createObjectURL(b);
@@ -329,6 +446,7 @@ function imp(ev){
       e={...e,...JSON.parse(x.target.result)};
       if(!e.titulos)e.titulos={};
       if(!e.dataReprogramacao)e.dataReprogramacao=null;
+      if(!e.questoes)e.questoes=[];
       sv();rend();ntf('📥 Importado!');
     }catch{ntf('❌ Erro','er');}
   };
@@ -384,6 +502,7 @@ function rend(){
 <div class="flex border-b overflow-x-auto">
 <button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
 <button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
+<button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
 </div>
 </div>
 
@@ -440,11 +559,58 @@ ${concluidas.map(c=>`
 
 ${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data</h2>${e.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${e.revs.filter(x=>x.s==='p').length})</h3>${e.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${e.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${e.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${e.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${e.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div></div>`:''}`}</div>`:''}
 
+${e.aba==='questoes'?`
+<h2 class="text-2xl font-bold mb-6">✍️ Questões</h2>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+<div class="bg-gradient-to-br from-pink-100 to-pink-200 p-4 rounded-xl"><p class="text-sm font-bold text-pink-900 mb-1">📅 Hoje</p><p class="text-3xl font-bold text-pink-700">${questoesHoje()}</p></div>
+<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📆 7 dias</p><p class="text-3xl font-bold text-purple-700">${questoesSemana()}</p><p class="text-xs text-purple-600">média ${mediaDiariaSemana()}/dia</p></div>
+<div class="bg-gradient-to-br from-blue-100 to-blue-200 p-4 rounded-xl"><p class="text-sm font-bold text-blue-900 mb-1">🗓️ 30 dias</p><p class="text-3xl font-bold text-blue-700">${questoesMes()}</p></div>
+<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">🎯 Total</p><p class="text-3xl font-bold text-green-700">${questoesTotal()}</p></div>
+</div>
+
+<div class="bg-gray-50 rounded-xl p-4 mb-8">
+<h3 class="font-bold text-gray-700 mb-3">📊 Questões resolvidas — últimos 14 dias</h3>
+${svgChartDias(14)}
+</div>
+
+<h3 class="text-xl font-bold text-gray-800 mb-4">📖 Por matéria</h3>
+<div class="grid md:grid-cols-2 gap-3 mb-8">
+${Object.keys(mat).map(ma=>{
+  const qtd = e.questoes.filter(q=>q.ma===ma).reduce((s,q)=>s+q.qtd,0);
+  return `<div class="border-2 border-purple-200 bg-purple-50 rounded-xl p-4 flex justify-between items-center gap-3">
+  <div class="min-w-0">
+    <h4 class="font-bold text-gray-800 break-words">${ma}</h4>
+    <span class="text-sm text-purple-700 font-bold">${qtd} questões resolvidas</span>
+  </div>
+  <button onclick="registrarQuestoes('${ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Questões</button>
+</div>`;
+}).join('')}
+</div>
+
+${e.questoes.length>0?`
+<details>
+<summary class="text-lg font-bold text-gray-700 mb-3 cursor-pointer list-none select-none">📋 Histórico (${e.questoes.length}) ▼</summary>
+<div class="max-h-80 overflow-y-auto space-y-2 mt-3">
+${e.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
+<div class="border-l-4 border-purple-400 bg-white rounded-lg p-3 flex justify-between items-center gap-3">
+  <div class="min-w-0">
+    <p class="text-sm font-bold text-gray-700">${q.data} — ${q.ma}</p>
+    <p class="text-xs text-gray-500">${q.qtd} questões</p>
+  </div>
+  <button onclick="delQuestao(${q.id})" class="text-red-500 hover:text-red-700 text-sm font-bold">🗑️</button>
+</div>`).join('')}
+</div>
+</details>`:'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhuma questão registrada ainda. Clique em "+ Questões" numa matéria acima.</p>'}
+`:''}
+
 </div>`;
 
   window.registrarAulas = registrarAulas;
   window.mkR = mkR;
   window.editData = editData;
+  window.registrarQuestoes = registrarQuestoes;
+  window.delQuestao = delQuestao;
   window.exp = exp;
   window.imp = imp;
   window.rst = rst;
