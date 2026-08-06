@@ -1,625 +1,497 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cronograma PC SP 2026 - Nuvem</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-body{font-family:system-ui}
-.fade{animation:f .3s}
-@keyframes f{from{opacity:0}to{opacity:1}}
-.tab-active{border-bottom:3px solid #4f46e5;color:#4f46e5}
-textarea{resize:vertical;min-height:60px}
-.sync-indicator{animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custo de Marmitas</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', sans-serif; background: #f8f9fa; color: #1a1a1a; }
+    .app { display: flex; min-height: 100vh; }
+    .sidebar { width: 280px; background: #1e293b; color: white; padding: 24px; display: flex; flex-direction: column; flex-shrink: 0; }
+    .main { flex: 1; overflow-y: auto; }
+    .content { padding: 32px; }
+    .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
+    .nav-btn { display: block; width: 100%; padding: 12px 16px; background: transparent; color: white; border: none; text-align: left; cursor: pointer; border-radius: 8px; margin-bottom: 8px; font-size: 14px; }
+    .nav-btn.active { background: #3b82f6; }
+    .btn { padding: 10px 16px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-success { background: #10b981; color: white; }
+    .btn-danger { background: #ef4444; color: white; padding: 6px 10px; }
+    .btn-small { padding: 4px 8px; font-size: 11px; }
+    .form-input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #667eea, #764ba2); }
+    .login-box { background: white; padding: 40px; border-radius: 12px; width: 100%; max-width: 400px; }
+    .inline-edit { display: inline-block; cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid transparent; }
+    .inline-edit:hover { background: #f0f0f0; border: 1px solid #ddd; }
+    .inline-input { padding: 4px 8px; border: 1px solid #3b82f6; border-radius: 4px; width: 100px; }
+    .recipe-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .recipe-tab { padding: 8px 16px; background: #f0f0f0; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .recipe-tab.active { background: #3b82f6; color: white; }
+    .stat-box { padding: 20px; }
+    .stat-label { font-size: 12px; color: #666; font-weight: 600; }
+    .stat-value { font-size: 28px; font-weight: 700; margin-top: 8px; }
+    .insumo-row { display: grid; grid-template-columns: 1fr 80px 80px 80px 100px; gap: 12px; align-items: center; padding: 12px; background: #f8f9fa; border-radius: 6px; margin-bottom: 8px; }
+    .insumo-row input { padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; }
+  </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
-<div id="n" class="fixed top-4 right-4 z-50"></div>
-<div id="modal-root"></div>
-<style>
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;}
-.modal-box{background:#fff;border-radius:16px;padding:28px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3);}
-</style>
-<div id="sync-status" class="fixed top-4 left-4 z-50"></div>
-<div id="app" class="max-w-7xl mx-auto"></div>
-
-<script type="module">
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
-  authDomain: "cronograma-d352c.firebaseapp.com",
-  projectId: "cronograma-d352c",
-  storageBucket: "cronograma-d352c.firebasestorage.app",
-  messagingSenderId: "1035295977614",
-  appId: "1:1035295977614:web:e4ef9bfd959470f0b759df"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-let userId = localStorage.getItem('userId');
-if (!userId) {
-  userId = 'user_' + Math.random().toString(36).substr(2, 9);
-  localStorage.setItem('userId', userId);
-}
-
-// Estado: cron é por MATÉRIA, questoes é por registro (matéria + data + quantidade)
-// cron: [{ id, ma, aulasTotal, aulasConcluidas, concluido }]
-// questoes: [{ id, ma, data, qtd }]
-let e={aba:'plano',dias:[],revs:[],stats:{a:0,d:0,r:0},cron:[],titulos:{},dataReprogramacao:null,questoes:[]};
-let syncEnabled = true;
-let isLoading = true;
-
-const mat={
-'Direito Penal – Parte Geral':53,
-'Direito Penal – Parte Especial':151,
-'Direito Processual Penal':53,
-'Legislação Penal Especial':168,
-'Direito Constitucional':45,
-'Criminologia':52,
-'Princípios Constitucionais':30,
-'Direitos Humanos':48,
-'Controle de Constitucionalidade':25,
-'Direito Penal Militar':35,
-'Execução Penal':40,
-'Tribunal do Júri':28,
-'Lei de Drogas':20,
-'Português':81,
-'Raciocínio Lógico':101,
-'Raciocínio Lógico (Matemático)':80,
-'Informática':160,
-'Informática (Teoria e Exercícios)':70,
-'Matemática':90
-};
-
-function showSyncStatus(msg, type='info') {
-  const colors = {info:'bg-blue-500',success:'bg-green-500',error:'bg-red-500',syncing:'bg-yellow-500'};
-  const icons = {info:'☁️',success:'✅',error:'❌',syncing:'🔄'};
-  document.getElementById('sync-status').innerHTML = `
-    <div class="${colors[type]} text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${type==='syncing'?'sync-indicator':''}">
-      <span>${icons[type]}</span><span class="text-sm font-medium">${msg}</span>
-    </div>`;
-  if(type!=='syncing') setTimeout(()=>{document.getElementById('sync-status').innerHTML='';},3000);
-}
-
-async function saveToCloud() {
-  if(!syncEnabled) return;
-  try {
-    showSyncStatus('Sincronizando...','syncing');
-    const docRef = doc(db,'cronogramas',userId);
-    await setDoc(docRef,{...e,lastUpdated:new Date().toISOString()});
-    showSyncStatus('Salvo na nuvem!','success');
-  } catch(error) {
-    console.error('Erro ao salvar:',error);
-    showSyncStatus('Erro ao sincronizar','error');
-  }
-  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
-}
-
-async function loadFromCloud() {
-  try {
-    showSyncStatus('Carregando da nuvem...','syncing');
-    const docRef = doc(db,'cronogramas',userId);
-    const docSnap = await getDoc(docRef);
-    if(docSnap.exists()) {
-      const data = docSnap.data();
-      e = {...e,...data};
-      if(!e.titulos) e.titulos={};
-      if(!e.dataReprogramacao) e.dataReprogramacao=null;
-      if(!e.questoes) e.questoes=[];
-      if(!e.cron.length) gen();
-      showSyncStatus('Carregado da nuvem!','success');
-    } else {
-      gen();
-      await saveToCloud();
-    }
-    isLoading=false;
-    rend();
-    setupRealtimeSync();
-  } catch(error) {
-    console.error('Erro ao carregar:',error);
-    showSyncStatus('Erro ao carregar','error');
-    ld();
-    isLoading=false;
-    rend();
-  }
-}
-
-function setupRealtimeSync() {
-  const docRef = doc(db,'cronogramas',userId);
-  onSnapshot(docRef,(snap)=>{
-    if(snap.exists()&&!isLoading){
-      const data=snap.data();
-      const currentUpdate=e.lastUpdated||'';
-      const cloudUpdate=data.lastUpdated||'';
-      if(cloudUpdate>currentUpdate){
-        e={...e,...data};
-        rend();
-        ntf('🔄 Atualizado de outro dispositivo!');
+<body>
+  <div id="root"></div>
+  <script>
+    class App {
+      constructor() {
+        this.state = {
+          isLoggedIn: false,
+          activeTab: 'dashboard',
+          dashboardFilter: 'mes',
+          insumos: [],
+          receitas: [],
+          clientes: [],
+          showInsumosForm: false,
+          showReceitasForm: false,
+          showClientesForm: false,
+          ingredientesList: [],
+          selectedReceitaId: null,
+          ingredientesByReceita: {}
+        };
+        this.render();
       }
-    }
-  });
-}
 
-function sv(){
-  saveToCloud();
-  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
-}
+      setState(updates) {
+        this.state = { ...this.state, ...updates };
+        this.render();
+      }
 
-function ld(){
-  try{
-    const s=localStorage.getItem('cron2');
-    if(s) e={...e,...JSON.parse(s)};
-    if(!e.titulos) e.titulos={};
-    if(!e.dataReprogramacao) e.dataReprogramacao=null;
-    if(!e.questoes) e.questoes=[];
-  }catch{}
-  if(!e.cron.length) gen();
-}
+      render() {
+        const root = document.getElementById('root');
+        if (!this.state.isLoggedIn) {
+          root.innerHTML = this.renderLogin();
+          this.attachLoginListeners();
+        } else {
+          root.innerHTML = this.renderApp();
+          this.attachAppListeners();
+        }
+      }
 
-// Gera cronograma: 1 item por MATÉRIA (não por dia)
-function gen(){
-  e.cron = Object.entries(mat).map(([ma,total],i)=>({
-    id: 'c'+i,
-    ma: ma,
-    aulasTotal: total,
-    aulasConcluidas: 0,
-    concluido: false
-  }));
-  sv();
-}
+      renderLogin() {
+        return `
+          <div class="login-screen">
+            <div class="login-box">
+              <h2 style="font-size: 28px; font-weight: 700; margin-bottom: 8px; text-align: center;">Custo de Marmitas</h2>
+              <p style="color: #666; text-align: center; margin-bottom: 32px;">Gerencie custos e precificação</p>
+              <input type="email" id="email" class="form-input" placeholder="seu@email.com" />
+              <input type="password" id="password" class="form-input" placeholder="••••••••" />
+              <button class="btn btn-primary" style="width: 100%;">Entrar</button>
+            </div>
+          </div>
+        `;
+      }
 
-function ntf(msg,tp='ok'){
-  const cor={ok:'bg-green-500',er:'bg-red-500',warn:'bg-yellow-500'};
-  const dv=document.createElement('div');
-  dv.className=`${cor[tp]} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
-  dv.textContent=msg;
-  document.getElementById('n').appendChild(dv);
-  setTimeout(()=>dv.remove(),3000);
-}
+      renderApp() {
+        return `
+          <div class="app">
+            <div class="sidebar">
+              <h1 style="font-size: 20px; margin-bottom: 8px;">📦 Marmitas</h1>
+              <nav style="margin-top: 32px; display: flex; flex-direction: column; gap: 8px;">
+                <button class="nav-btn ${this.state.activeTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">📊 Dashboard</button>
+                <button class="nav-btn ${this.state.activeTab === 'insumos' ? 'active' : ''}" data-tab="insumos">🥘 Insumos</button>
+                <button class="nav-btn ${this.state.activeTab === 'receitas' ? 'active' : ''}" data-tab="receitas">🍛 Receitas</button>
+                <button class="nav-btn ${this.state.activeTab === 'clientes' ? 'active' : ''}" data-tab="clientes">👥 Clientes</button>
+              </nav>
+              <button id="logout" class="btn btn-danger" style="margin-top: auto; width: 100%;">Sair</button>
+            </div>
+            <div class="main">
+              ${this.state.activeTab === 'dashboard' ? this.renderDashboard() : ''}
+              ${this.state.activeTab === 'insumos' ? this.renderInsumos() : ''}
+              ${this.state.activeTab === 'receitas' ? this.renderReceitas() : ''}
+              ${this.state.activeTab === 'clientes' ? this.renderClientes() : ''}
+            </div>
+          </div>
+        `;
+      }
 
+      renderDashboard() {
+        const custoTotal = this.state.insumos.reduce((sum, i) => sum + (i.preco_embalagem || 0), 0).toFixed(2);
+        const faturamentoTotal = this.state.clientes.reduce((sum, c) => sum + parseFloat(c.faturamento_total || 0), 0).toFixed(2);
+        const resultado = (faturamentoTotal - custoTotal).toFixed(2);
 
+        return `
+          <div class="content">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+              <h2 style="font-size: 28px; font-weight: 700;">📊 Dashboard</h2>
+              <div>
+                <select id="filterPeriod" style="padding: 8px 12px; border-radius: 6px; border: 1px solid #ddd;">
+                  <option value="dia">Dia</option>
+                  <option value="semana">Semana</option>
+                  <option value="mes" selected>Mês</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="grid">
+              <div class="card stat-box">
+                <div class="stat-label">Custo Total</div>
+                <div class="stat-value" style="color: #ef4444;">R$ ${custoTotal}</div>
+              </div>
+              <div class="card stat-box">
+                <div class="stat-label">Faturamento</div>
+                <div class="stat-value" style="color: #10b981;">R$ ${faturamentoTotal}</div>
+              </div>
+              <div class="card stat-box">
+                <div class="stat-label">Resultado</div>
+                <div class="stat-value" style="color: ${resultado >= 0 ? '#3b82f6' : '#ef4444';}">R$ ${resultado}</div>
+              </div>
+            </div>
 
-// Helpers de data
-function parseDMY(s){const[d,m,y]=s.split('/');return new Date(+y,+m-1,+d);}
-function fmtDMY(d){return d.toLocaleDateString('pt-BR');}
-function addDias(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+            <h3 style="font-size: 16px; font-weight: 600; margin: 32px 0 16px 0;">Clientes</h3>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+              ${this.state.clientes.map(c => `
+                <div class="card">
+                  <strong>${c.nome}</strong>
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; padding: 12px; background: #f8f9fa; border-radius: 6px;">
+                    <div><div style="font-size: 11px; color: #666;">Pedidos</div><div style="font-size: 16px; font-weight: 700; color: #2563eb;">${c.total_pedidos}</div></div>
+                    <div><div style="font-size: 11px; color: #666;">Faturamento</div><div style="font-size: 16px; font-weight: 700; color: #10b981;">R$ ${c.faturamento_total}</div></div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
 
-// Acha próxima data disponível com menos de 2 revisões, a partir de 'base'
-function proximaData(base){
-  const cnt={};
-  e.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
-  let d=new Date(base);
-  for(let i=0;i<365;i++){
-    const k=fmtDMY(d);
-    if((cnt[k]||0)<2) return k;
-    d=addDias(d,1);
-  }
-  return fmtDMY(base);
-}
+      renderInsumos() {
+        const list = this.state.insumos.map(i => `
+          <div class="insumo-row">
+            <div><strong>${i.nome}</strong></div>
+            <div>
+              <select data-insumo-id="${i.id}" data-change="unidade" style="padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <option value="g" ${i.unidade === 'g' ? 'selected' : ''}>g</option>
+                <option value="kg" ${i.unidade === 'kg' ? 'selected' : ''}>kg</option>
+                <option value="ml" ${i.unidade === 'ml' ? 'selected' : ''}>ml</option>
+                <option value="L" ${i.unidade === 'L' ? 'selected' : ''}>L</option>
+                <option value="un" ${i.unidade === 'un' ? 'selected' : ''}>un</option>
+              </select>
+            </div>
+            <div><input type="number" data-insumo-id="${i.id}" data-change="qtd" value="${i.qtd_embalagem}" step="0.01" class="insumo-row input" /></div>
+            <div><input type="number" data-insumo-id="${i.id}" data-change="preco" value="${i.preco_embalagem}" step="0.01" class="insumo-row input" /></div>
+            <div style="text-align: right;">
+              <div style="font-size: 11px; color: #666;">Custo</div>
+              <div style="font-weight: 600; color: #2563eb;">R$ ${(i.preco_embalagem / i.qtd_embalagem).toFixed(2)}</div>
+            </div>
+            <button class="btn btn-danger btn-small" data-delete-insumo="${i.id}">Del</button>
+          </div>
+        `).join('');
 
-// Gera as 4 revisões respeitando máx 2/dia, a partir da data escolhida pelo usuário
-function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas=''){
-  // intervalos a partir da data1 escolhida
-  const intervalos=[
-    {t:'7d',  dias:0,  cor:'amber'},
-    {t:'14d', dias:7,  cor:'orange'},
-    {t:'30d', dias:23, cor:'purple'},
-    {t:'60d', dias:53, cor:'blue'}
-  ];
-  // reconstrói contagem incluindo o que já existe
-  const cnt={};
-  e.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+        return `
+          <div class="content">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 24px;">
+              <h2 style="font-size: 28px; font-weight: 700;">🥘 Insumos</h2>
+              <button class="btn btn-primary" id="newInsumo">+ Novo</button>
+            </div>
+            ${this.state.showInsumosForm ? `
+              <div class="card">
+                <h3 style="margin-bottom: 16px;">Novo Insumo</h3>
+                <input type="text" id="insumoNome" class="form-input" placeholder="Nome" />
+                <select id="insumoUnidade" class="form-input"><option>g</option><option>kg</option><option>ml</option><option>L</option><option>un</option></select>
+                <input type="number" id="insumoQtd" class="form-input" placeholder="Qtd. Embalagem" step="0.01" />
+                <input type="number" id="insumoPreco" class="form-input" placeholder="Preço (R$)" step="0.01" />
+                <button class="btn btn-success" id="saveInsumo">Salvar</button>
+              </div>
+            ` : ''}
+            ${list || '<p style="color: #999;">Nenhum insumo</p>'}
+          </div>
+        `;
+      }
 
-  intervalos.forEach(({t,dias,cor})=>{
-    let d=addDias(data1,dias);
-    for(let i=0;i<365;i++){
-      const k=fmtDMY(d);
-      if((cnt[k]||0)<2){
-        cnt[k]=(cnt[k]||0)+1;
-        e.revs.push({
-          id:`${dsId}-${t}-${Math.random().toString(36).substr(2,4)}`,
-          di:dsId,ma,i:de,f:ate,q:qtd,titulo:notas,dr:k,t,s:'p',cor
+      renderReceitas() {
+        if (this.state.receitas.length === 0) {
+          return `
+            <div class="content">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 24px;">
+                <h2 style="font-size: 28px; font-weight: 700;">🍛 Receitas</h2>
+                <button class="btn btn-primary" id="newReceita">+ Nova</button>
+              </div>
+              ${this.state.showReceitasForm ? `
+                <div class="card">
+                  <h3 style="margin-bottom: 16px;">Nova Receita</h3>
+                  <input type="text" id="receitaNome" class="form-input" placeholder="Nome" />
+                  <input type="number" id="receitaLucro" class="form-input" placeholder="% Lucro" value="30" />
+                  <button class="btn btn-success" id="saveReceita">Salvar</button>
+                </div>
+              ` : ''}
+              <p style="color: #999;">Nenhuma receita. Crie uma para começar.</p>
+            </div>
+          `;
+        }
+
+        const selectedReceita = this.state.receitas.find(r => r.id === this.state.selectedReceitaId) || this.state.receitas[0];
+        const ingredientes = this.state.ingredientesByReceita[selectedReceita.id] || [];
+
+        return `
+          <div class="content">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 24px;">
+              <h2 style="font-size: 28px; font-weight: 700;">🍛 Receitas</h2>
+              <button class="btn btn-primary" id="newReceita">+ Nova</button>
+            </div>
+
+            <div class="recipe-tabs">
+              ${this.state.receitas.map(r => `
+                <button class="recipe-tab ${r.id === selectedReceita.id ? 'active' : ''}" data-receita-id="${r.id}">${r.nome}</button>
+              `).join('')}
+            </div>
+
+            <div class="card">
+              <h3 style="margin-bottom: 16px;">Receita: ${selectedReceita.nome}</h3>
+              
+              <h4 style="margin: 16px 0 12px 0; font-weight: 600;">Adicionar Ingrediente</h4>
+              <div style="display: grid; grid-template-columns: 1fr 120px auto; gap: 12px; margin-bottom: 20px;">
+                <select id="ingredienteInsumo" class="form-input" style="margin-bottom: 0;">
+                  <option value="">Selecione</option>
+                  ${this.state.insumos.map(i => `<option value="${i.id}" data-unit="${i.unidade}">${i.nome} (${i.unidade})</option>`).join('')}
+                </select>
+                <input type="number" id="ingredienteQtd" class="form-input" placeholder="Quantidade" style="margin-bottom: 0;" />
+                <button class="btn btn-success" id="addIngrediente" style="align-self: flex-start;">+ Add</button>
+              </div>
+
+              ${ingredientes.length > 0 ? `
+                <h4 style="margin: 20px 0 12px 0; font-weight: 600;">Ingredientes</h4>
+                <div style="margin-bottom: 20px;">
+                  ${ingredientes.map(ing => `
+                    <div class="card" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; padding: 12px; background: #f8f9fa;">
+                      <div><strong>${ing.nome}</strong> - ${ing.quantidade}${ing.unidade} • R$ ${ing.custo}</div>
+                      <button class="btn btn-danger btn-small" data-remove-ing="${ing.temp_id}">Remover</button>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+
+              <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin-top: 20px;">
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+                  <div>
+                    <div style="font-size: 11px; color: #666; font-weight: 600;">Custo Total</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #2563eb; margin-top: 4px;">R$ ${ingredientes.reduce((sum, ing) => sum + parseFloat(ing.custo), 0).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 11px; color: #666; font-weight: 600;">% Lucro</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #10b981; margin-top: 4px;">${selectedReceita.percentual_lucro || 30}%</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 11px; color: #666; font-weight: 600;">Preço Venda</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #8b5cf6; margin-top: 4px;">R$ ${(ingredientes.reduce((sum, ing) => sum + parseFloat(ing.custo), 0) * (1 + (selectedReceita.percentual_lucro || 30) / 100)).toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div style="font-size: 11px; color: #666; font-weight: 600;">Lucro</div>
+                    <div style="font-size: 18px; font-weight: 700; color: #f59e0b; margin-top: 4px;">R$ ${(ingredientes.reduce((sum, ing) => sum + parseFloat(ing.custo), 0) * ((selectedReceita.percentual_lucro || 30) / 100)).toFixed(2)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <button class="btn btn-danger" data-delete-receita="${selectedReceita.id}" style="margin-top: 20px;">Deletar Receita</button>
+            </div>
+          </div>
+        `;
+      }
+
+      renderClientes() {
+        const list = this.state.clientes.map(c => `
+          <div class="card">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 16px;">
+              <strong>${c.nome}</strong>
+              <button class="btn btn-danger" data-delete-cliente="${c.id}">Deletar</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; background: #f8f9fa; border-radius: 6px;">
+              <div><div style="font-size: 11px; color: #666;">Pedidos</div><div style="font-size: 18px; font-weight: 700; color: #2563eb;">${c.total_pedidos}</div></div>
+              <div><div style="font-size: 11px; color: #666;">Faturamento</div><div style="font-size: 18px; font-weight: 700; color: #10b981;">R$ ${c.faturamento_total}</div></div>
+            </div>
+          </div>
+        `).join('');
+
+        return `
+          <div class="content">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 24px;">
+              <h2 style="font-size: 28px; font-weight: 700;">👥 Clientes</h2>
+              <button class="btn btn-primary" id="newCliente">+ Novo</button>
+            </div>
+            ${this.state.showClientesForm ? `
+              <div class="card">
+                <input type="text" id="clienteNome" class="form-input" placeholder="Nome" />
+                <button class="btn btn-success" id="saveCliente">Adicionar</button>
+              </div>
+            ` : ''}
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+              ${list || '<p style="color: #999;">Nenhum cliente</p>'}
+            </div>
+          </div>
+        `;
+      }
+
+      attachLoginListeners() {
+        document.querySelector('.btn-primary').addEventListener('click', () => {
+          const email = document.getElementById('email').value;
+          const password = document.getElementById('password').value;
+          if (!email || !password) return;
+          this.setState({
+            isLoggedIn: true,
+            insumos: [
+              { id: 1, nome: 'Arroz', unidade: 'kg', qtd_embalagem: 1, preco_embalagem: 6 },
+              { id: 2, nome: 'Feijão', unidade: 'kg', qtd_embalagem: 1, preco_embalagem: 5 },
+              { id: 3, nome: 'Frango', unidade: 'kg', qtd_embalagem: 1, preco_embalagem: 15 },
+              { id: 4, nome: 'Leite', unidade: 'L', qtd_embalagem: 1, preco_embalagem: 4 }
+            ],
+            receitas: [
+              { id: 1, nome: 'Marmita Mini', percentual_lucro: 30 },
+              { id: 2, nome: 'Marmita Especial', percentual_lucro: 40 }
+            ],
+            ingredientesByReceita: {
+              1: [],
+              2: []
+            },
+            clientes: [
+              { id: 1, nome: 'Luana', total_pedidos: 6, faturamento_total: 31.2 },
+              { id: 2, nome: 'Maria', total_pedidos: 3, faturamento_total: 11.2 }
+            ],
+            selectedReceitaId: 1
+          });
         });
-        break;
       }
-      d=addDias(d,1);
+
+      attachAppListeners() {
+        document.querySelectorAll('[data-tab]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            this.setState({ activeTab: e.target.dataset.tab });
+          });
+        });
+
+        document.getElementById('logout').addEventListener('click', () => {
+          this.setState({ isLoggedIn: false });
+        });
+
+        document.getElementById('filterPeriod')?.addEventListener('change', (e) => {
+          this.setState({ dashboardFilter: e.target.value });
+        });
+
+        // Insumos
+        document.getElementById('newInsumo')?.addEventListener('click', () => {
+          this.setState({ showInsumosForm: !this.state.showInsumosForm });
+        });
+
+        document.getElementById('saveInsumo')?.addEventListener('click', () => {
+          const nome = document.getElementById('insumoNome').value;
+          const unidade = document.getElementById('insumoUnidade').value;
+          const qtd = parseFloat(document.getElementById('insumoQtd').value);
+          const preco = parseFloat(document.getElementById('insumoPreco').value);
+          if (!nome || !qtd || !preco) return;
+          const newId = Math.max(...this.state.insumos.map(i => i.id), 0) + 1;
+          this.state.insumos.push({ id: newId, nome, unidade, qtd_embalagem: qtd, preco_embalagem: preco });
+          this.setState({ showInsumosForm: false });
+        });
+
+        document.querySelectorAll('[data-change="unidade"], [data-change="qtd"], [data-change="preco"]').forEach(input => {
+          input.addEventListener('change', (e) => {
+            const insumoId = parseInt(e.target.dataset.insumoId);
+            const field = e.target.dataset.change;
+            const insumo = this.state.insumos.find(i => i.id === insumoId);
+            if (field === 'unidade') insumo.unidade = e.target.value;
+            if (field === 'qtd') insumo.qtd_embalagem = parseFloat(e.target.value);
+            if (field === 'preco') insumo.preco_embalagem = parseFloat(e.target.value);
+            this.render();
+            this.attachAppListeners();
+          });
+        });
+
+        document.querySelectorAll('[data-delete-insumo]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const id = parseInt(e.target.dataset.deleteInsumo);
+            this.setState({ insumos: this.state.insumos.filter(i => i.id !== id) });
+          });
+        });
+
+        // Receitas
+        document.querySelectorAll('[data-receita-id]').forEach(tab => {
+          tab.addEventListener('click', (e) => {
+            this.setState({ selectedReceitaId: parseInt(e.target.dataset.receitaId) });
+          });
+        });
+
+        document.getElementById('newReceita')?.addEventListener('click', () => {
+          this.setState({ showReceitasForm: !this.state.showReceitasForm });
+        });
+
+        document.getElementById('saveReceita')?.addEventListener('click', () => {
+          const nome = document.getElementById('receitaNome').value;
+          const lucro = parseInt(document.getElementById('receitaLucro').value) || 30;
+          if (!nome) return;
+          const newId = Math.max(...this.state.receitas.map(r => r.id), 0) + 1;
+          this.state.receitas.push({ id: newId, nome, percentual_lucro: lucro });
+          this.state.ingredientesByReceita[newId] = [];
+          this.setState({ showReceitasForm: false, selectedReceitaId: newId });
+        });
+
+        document.getElementById('addIngrediente')?.addEventListener('click', () => {
+          const insumoId = parseInt(document.getElementById('ingredienteInsumo').value);
+          const qtd = parseFloat(document.getElementById('ingredienteQtd').value);
+          if (!insumoId || !qtd) return;
+          const insumo = this.state.insumos.find(i => i.id === insumoId);
+          const custo = ((qtd / 1000) * (insumo.preco_embalagem / insumo.qtd_embalagem)).toFixed(2);
+          if (!this.state.ingredientesByReceita[this.state.selectedReceitaId]) {
+            this.state.ingredientesByReceita[this.state.selectedReceitaId] = [];
+          }
+          this.state.ingredientesByReceita[this.state.selectedReceitaId].push({ 
+            temp_id: Math.random(), 
+            nome: insumo.nome, 
+            quantidade: qtd, 
+            unidade: insumo.unidade,
+            custo 
+          });
+          this.render();
+          this.attachAppListeners();
+        });
+
+        document.querySelectorAll('[data-remove-ing]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const tempId = parseFloat(e.target.dataset.removeIng);
+            this.state.ingredientesByReceita[this.state.selectedReceitaId] = 
+              this.state.ingredientesByReceita[this.state.selectedReceitaId].filter(i => i.temp_id !== tempId);
+            this.render();
+            this.attachAppListeners();
+          });
+        });
+
+        document.querySelectorAll('[data-delete-receita]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const id = parseInt(e.target.dataset.deleteReceita);
+            this.setState({ 
+              receitas: this.state.receitas.filter(r => r.id !== id),
+              selectedReceitaId: this.state.receitas.find(r => r.id !== id)?.id || null
+            });
+          });
+        });
+
+        // Clientes
+        document.getElementById('newCliente')?.addEventListener('click', () => {
+          this.setState({ showClientesForm: !this.state.showClientesForm });
+        });
+
+        document.getElementById('saveCliente')?.addEventListener('click', () => {
+          const nome = document.getElementById('clienteNome').value;
+          if (!nome) return;
+          const newId = Math.max(...this.state.clientes.map(c => c.id), 0) + 1;
+          this.state.clientes.push({ id: newId, nome, total_pedidos: 0, faturamento_total: 0 });
+          this.setState({ showClientesForm: false });
+        });
+
+        document.querySelectorAll('[data-delete-cliente]').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            const id = parseInt(e.target.dataset.deleteCliente);
+            this.setState({ clientes: this.state.clientes.filter(c => c.id !== id) });
+          });
+        });
+      }
     }
-  });
-}
 
-// Abre modal para registrar estudo
-function registrarAulas(id){
-  const item = e.cron.find(c=>c.id===id);
-  if(!item) return;
-  const restante = item.aulasTotal - item.aulasConcluidas;
-  const hoje = new Date(); hoje.setHours(0,0,0,0);
-  // sugestão: hoje + 7 dias em yyyy-mm-dd para input type=date
-  const sug = addDias(hoje,7);
-  const sugISO = sug.getFullYear()+'-'+String(sug.getMonth()+1).padStart(2,'0')+'-'+String(sug.getDate()).padStart(2,'0');
-
-  document.getElementById('modal-root').innerHTML = `
-    <div class="modal-overlay" id="modal-overlay">
-      <div class="modal-box fade">
-        <h3 class="text-lg font-bold mb-1">📚 Registrar estudo</h3>
-        <p class="text-sm text-gray-500 mb-4">${item.ma}</p>
-
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Quantas aulas você estudou?</label>
-        <div class="flex items-center gap-3 mb-4">
-          <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
-            class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
-          <span class="text-sm text-gray-400">de ${restante} restantes</span>
-        </div>
-
-        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data da 1ª revisão</label>
-        <input id="m-data1" type="date" value="${sugISO}"
-          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-1 focus:border-indigo-500 focus:outline-none">
-        <p class="text-xs text-gray-400 mb-4">As demais revisões serão calculadas a partir desta data.</p>
-
-        <label class="block text-sm font-semibold text-gray-700 mb-1">📝 Conteúdo estudado (opcional)</label>
-        <textarea id="m-notas" placeholder="Ex: Art. 1 ao Art. 10 — Princípios do Direito Penal"
-          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none" rows="3"></textarea>
-
-        <div class="flex gap-3">
-          <button id="m-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-          <button id="m-confirmar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
-        </div>
-      </div>
-    </div>`;
-
-  document.getElementById('m-cancelar').onclick = () => {
-    document.getElementById('modal-root').innerHTML = '';
-  };
-
-  document.getElementById('m-confirmar').onclick = () => {
-    const qtd = parseInt(document.getElementById('m-qtd').value)||0;
-    const dataStr = document.getElementById('m-data1').value;
-    if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de aulas','er');return;}
-    if(!dataStr){ntf('❌ Informe a data da 1ª revisão','er');return;}
-    const real = Math.min(qtd, restante);
-    // converte yyyy-mm-dd para Date
-    const [y,m,d] = dataStr.split('-');
-    const data1 = new Date(+y,+m-1,+d);
-    const de = item.aulasConcluidas+1;
-    const ate = item.aulasConcluidas+real;
-    item.aulasConcluidas += real;
-    if(item.aulasConcluidas>=item.aulasTotal) item.concluido=true;
-    e.stats.a += real;
-    e.stats.d++;
-    const notas = document.getElementById('m-notas').value.trim();
-    const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:notas};
-    e.dias.push(ds);
-    gerarRevisoes(ds.id, item.ma, de, ate, real, data1, notas);
-    document.getElementById('modal-root').innerHTML = '';
-    sv();rend();
-    ntf(`🎉 +${real} aulas em ${item.ma}!`);
-  };
-}
-
-function mkR(id){
-  const r=e.revs.find(x=>x.id===id);
-  if(r){r.s='c';e.stats.r++;sv();rend();ntf('✅ Revisão OK!');}
-}
-
-function editData(id){
-  const r=e.revs.find(x=>x.id===id);
-  if(!r) return;
-  const novaData=prompt('📅 Nova data da revisão (dd/mm/aaaa):',r.dr);
-  if(novaData&&/^\d{2}\/\d{2}\/\d{4}$/.test(novaData)){
-    r.dr=novaData;sv();rend();ntf('📅 Data atualizada!');
-  }else if(novaData){
-    ntf('❌ Formato inválido! Use dd/mm/aaaa','er');
-  }
-}
-
-// ===== QUESTÕES =====
-
-// Abre modal para registrar quantidade de questões resolvidas numa matéria/data
-function registrarQuestoes(ma){
-  const hoje=new Date();
-  const hojeISO = hoje.getFullYear()+'-'+String(hoje.getMonth()+1).padStart(2,'0')+'-'+String(hoje.getDate()).padStart(2,'0');
-
-  document.getElementById('modal-root').innerHTML = `
-    <div class="modal-overlay" id="modal-overlay">
-      <div class="modal-box fade">
-        <h3 class="text-lg font-bold mb-1">✍️ Registrar questões</h3>
-        <p class="text-sm text-gray-500 mb-4">${ma}</p>
-
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Quantas questões você resolveu?</label>
-        <input id="q-qtd" type="number" min="1" value="10"
-          class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold mb-4 focus:border-purple-500 focus:outline-none">
-
-        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data</label>
-        <input id="q-data" type="date" value="${hojeISO}"
-          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-5 focus:border-purple-500 focus:outline-none">
-
-        <div class="flex gap-3">
-          <button id="q-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-          <button id="q-confirmar" class="flex-1 bg-purple-600 text-white rounded-lg py-2.5 font-semibold hover:bg-purple-700">Confirmar</button>
-        </div>
-      </div>
-    </div>`;
-
-  document.getElementById('q-cancelar').onclick = () => {
-    document.getElementById('modal-root').innerHTML = '';
-  };
-
-  document.getElementById('q-confirmar').onclick = () => {
-    const qtd = parseInt(document.getElementById('q-qtd').value)||0;
-    const dataStr = document.getElementById('q-data').value;
-    if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de questões','er');return;}
-    if(!dataStr){ntf('❌ Informe a data','er');return;}
-    const [y,m,d] = dataStr.split('-');
-    const dataFmt = `${d}/${m}/${y}`;
-    e.questoes.push({id:Date.now(),ma,data:dataFmt,qtd});
-    document.getElementById('modal-root').innerHTML = '';
-    sv();rend();
-    ntf(`🎉 +${qtd} questões em ${ma}!`);
-  };
-}
-
-function delQuestao(id){
-  if(!confirm('Remover este registro?')) return;
-  e.questoes = e.questoes.filter(q=>q.id!==id);
-  sv();rend();
-  ntf('🗑️ Removido');
-}
-
-function diasAtras(n){
-  const arr=[];
-  const hoje=new Date(); hoje.setHours(0,0,0,0);
-  for(let i=n-1;i>=0;i--) arr.push(fmtDMY(addDias(hoje,-i)));
-  return arr;
-}
-
-function questoesPorDia(n=14){
-  const dias=diasAtras(n);
-  const mapa={};
-  e.questoes.forEach(q=>{mapa[q.data]=(mapa[q.data]||0)+q.qtd;});
-  return dias.map(d=>({data:d,qtd:mapa[d]||0}));
-}
-
-function questoesHoje(){
-  const hj=fmtDMY(new Date());
-  return e.questoes.filter(q=>q.data===hj).reduce((s,q)=>s+q.qtd,0);
-}
-function questoesSemana(){
-  const dias=diasAtras(7);
-  return e.questoes.filter(q=>dias.includes(q.data)).reduce((s,q)=>s+q.qtd,0);
-}
-function questoesMes(){
-  const dias=diasAtras(30);
-  return e.questoes.filter(q=>dias.includes(q.data)).reduce((s,q)=>s+q.qtd,0);
-}
-function questoesTotal(){
-  return e.questoes.reduce((s,q)=>s+q.qtd,0);
-}
-function questoesPorMateria(){
-  const mapa={};
-  e.questoes.forEach(q=>{mapa[q.ma]=(mapa[q.ma]||0)+q.qtd;});
-  return Object.keys(mat).map(ma=>({ma,qtd:mapa[ma]||0})).sort((a,b)=>b.qtd-a.qtd);
-}
-function mediaDiariaSemana(){
-  return (questoesSemana()/7).toFixed(1);
-}
-
-// Gráfico de barras (SVG) das últimas N dias
-function svgChartDias(n=14){
-  const dados=questoesPorDia(n);
-  const max=Math.max(...dados.map(d=>d.qtd),1);
-  const w=760,h=190,padB=34,padT=20,padL=10,padR=10;
-  const areaW=w-padL-padR;
-  const bw=areaW/dados.length;
-  const bars=dados.map((d,i)=>{
-    const bh=max>0?(d.qtd/max)*(h-padT-padB):0;
-    const x=padL+i*bw+bw*0.15;
-    const bwReal=bw*0.7;
-    const y=h-padB-bh;
-    const [dd,mm]=d.data.split('/');
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bwReal.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="#7c3aed"/>
-    ${d.qtd>0?`<text x="${(x+bwReal/2).toFixed(1)}" y="${(y-4).toFixed(1)}" font-size="10" text-anchor="middle" fill="#374151" font-weight="bold">${d.qtd}</text>`:''}
-    <text x="${(x+bwReal/2).toFixed(1)}" y="${h-padB+14}" font-size="9" text-anchor="middle" fill="#6b7280">${dd}/${mm}</text>`;
-  }).join('');
-  return `<svg viewBox="0 0 ${w} ${h}" class="w-full">
-    <line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="#e5e7eb"/>
-    ${bars}
-  </svg>`;
-}
-
-function exp(){
-  const b=new Blob([JSON.stringify(e,null,2)],{type:'application/json'});
-  const u=URL.createObjectURL(b);
-  const a=document.createElement('a');
-  a.href=u;a.download=`backup-${new Date().toISOString().split('T')[0]}.json`;
-  a.click();URL.revokeObjectURL(u);ntf('💾 Exportado!');
-}
-
-function imp(ev){
-  const f=ev.target.files[0];if(!f) return;
-  const r=new FileReader();
-  r.onload=x=>{
-    try{
-      e={...e,...JSON.parse(x.target.result)};
-      if(!e.titulos)e.titulos={};
-      if(!e.dataReprogramacao)e.dataReprogramacao=null;
-      if(!e.questoes)e.questoes=[];
-      sv();rend();ntf('📥 Importado!');
-    }catch{ntf('❌ Erro','er');}
-  };
-  r.readAsText(f);
-}
-
-function rst(){
-  if(confirm('⚠️ Resetar tudo? Isto apagará os dados da nuvem também!')){
-    saveToCloud().then(()=>{localStorage.removeItem('cron2');location.reload();});
-  }
-}
-
-function showUserId(){
-  const newId=prompt('🆔 Seu ID de usuário (copie para usar em outro dispositivo):',userId);
-  if(newId&&newId!==userId&&confirm('Deseja trocar para este ID? Isso carregará os dados desse usuário.')){
-    userId=newId;
-    localStorage.setItem('userId',userId);
-    location.reload();
-  }
-}
-
-function rend(){
-  const pd=e.revs.filter(x=>x.s==='p').length;
-  const ta=Object.values(mat).reduce((s,v)=>s+v,0);
-  const pg=(e.stats.a/ta*100).toFixed(1);
-
-  const pendentes = e.cron.filter(c=>!c.concluido);
-  const concluidas = e.cron.filter(c=>c.concluido);
-
-  document.getElementById('app').innerHTML=`
-<div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-<div class="flex justify-between items-start gap-4 mb-6 flex-wrap">
-<div>
-  <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
-  <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
-  <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,12)}...</button>
-</div>
-<div class="flex gap-2 flex-wrap">
-<button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
-<label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
-<button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
-</div>
-</div>
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-<div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl"><p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p><p class="text-3xl font-bold text-indigo-700">${e.stats.a}</p><p class="text-xs text-indigo-600">de ${ta}</p></div>
-<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">📖 Matérias</p><p class="text-3xl font-bold text-green-700">${concluidas.length}</p><p class="text-xs text-green-600">de ${e.cron.length} concluídas</p></div>
-<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📊 Progresso</p><p class="text-3xl font-bold text-purple-700">${pg}%</p></div>
-<div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p><p class="text-3xl font-bold text-orange-700">${pd}</p><p class="text-xs text-orange-600">${e.stats.r} completas</p></div>
-</div>
-</div>
-
-<div class="bg-white rounded-t-2xl shadow-xl">
-<div class="flex border-b overflow-x-auto">
-<button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
-<button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
-<button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
-</div>
-</div>
-
-<div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
-
-${e.aba==='plano'?`
-<h2 class="text-2xl font-bold mb-6">📋 Plano de Estudo</h2>
-
-<!-- PENDENTES -->
-<div class="mb-10">
-<h3 class="text-xl font-bold text-yellow-700 mb-4">⏳ Pendentes (${pendentes.length})</h3>
-<div class="grid md:grid-cols-2 gap-3">
-${pendentes.map(c=>{
-  const pct = Math.round(c.aulasConcluidas/c.aulasTotal*100);
-  return `<div class="border-2 border-yellow-300 bg-yellow-50 rounded-xl p-4 hover:shadow-lg transition-all">
-  <div class="flex justify-between items-start gap-3 mb-3">
-    <div class="flex-1 min-w-0">
-      <h4 class="font-bold text-gray-800 break-words mb-1">${c.ma}</h4>
-      <div class="flex gap-2 text-xs flex-wrap">
-        <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">📚 ${c.aulasTotal} aulas</span>
-        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${c.aulasConcluidas} feitas</span>
-        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${c.aulasTotal-c.aulasConcluidas} restantes</span>
-      </div>
-    </div>
-    <button onclick="registrarAulas('${c.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Estudei</button>
-  </div>
-  <div class="w-full bg-gray-200 rounded-full h-2">
-    <div class="bg-indigo-500 h-2 rounded-full transition-all" style="width:${pct}%"></div>
-  </div>
-  <p class="text-xs text-gray-400 mt-1">${pct}% concluído</p>
-</div>`;
-}).join('')}
-</div>
-</div>
-
-<!-- FINALIZADAS -->
-${concluidas.length>0?`
-<details>
-<summary class="text-xl font-bold text-green-700 mb-4 cursor-pointer list-none select-none">✅ Finalizadas (${concluidas.length}) ▼</summary>
-<div class="grid md:grid-cols-2 gap-3 mt-4">
-${concluidas.map(c=>`
-<div class="border-2 border-green-300 bg-green-50 rounded-xl p-4">
-  <div class="flex justify-between items-start gap-3">
-    <div class="flex-1 min-w-0">
-      <h4 class="font-bold text-gray-800 line-through opacity-60 break-words mb-1">${c.ma}</h4>
-      <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">📚 ${c.aulasTotal} aulas</span>
-    </div>
-    <span class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex-shrink-0">✓ Feito</span>
-  </div>
-</div>`).join('')}
-</div>
-</details>`:''}
-`:''}
-
-${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data</h2>${e.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${e.revs.filter(x=>x.s==='p').length})</h3>${e.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${e.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${e.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${e.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${e.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div></div>`:''}`}</div>`:''}
-
-${e.aba==='questoes'?`
-<h2 class="text-2xl font-bold mb-6">✍️ Questões</h2>
-
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-<div class="bg-gradient-to-br from-pink-100 to-pink-200 p-4 rounded-xl"><p class="text-sm font-bold text-pink-900 mb-1">📅 Hoje</p><p class="text-3xl font-bold text-pink-700">${questoesHoje()}</p></div>
-<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📆 7 dias</p><p class="text-3xl font-bold text-purple-700">${questoesSemana()}</p><p class="text-xs text-purple-600">média ${mediaDiariaSemana()}/dia</p></div>
-<div class="bg-gradient-to-br from-blue-100 to-blue-200 p-4 rounded-xl"><p class="text-sm font-bold text-blue-900 mb-1">🗓️ 30 dias</p><p class="text-3xl font-bold text-blue-700">${questoesMes()}</p></div>
-<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">🎯 Total</p><p class="text-3xl font-bold text-green-700">${questoesTotal()}</p></div>
-</div>
-
-<div class="bg-gray-50 rounded-xl p-4 mb-8">
-<h3 class="font-bold text-gray-700 mb-3">📊 Questões resolvidas — últimos 14 dias</h3>
-${svgChartDias(14)}
-</div>
-
-<h3 class="text-xl font-bold text-gray-800 mb-4">📖 Por matéria</h3>
-<div class="grid md:grid-cols-2 gap-3 mb-8">
-${Object.keys(mat).map(ma=>{
-  const qtd = e.questoes.filter(q=>q.ma===ma).reduce((s,q)=>s+q.qtd,0);
-  return `<div class="border-2 border-purple-200 bg-purple-50 rounded-xl p-4 flex justify-between items-center gap-3">
-  <div class="min-w-0">
-    <h4 class="font-bold text-gray-800 break-words">${ma}</h4>
-    <span class="text-sm text-purple-700 font-bold">${qtd} questões resolvidas</span>
-  </div>
-  <button onclick="registrarQuestoes('${ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Questões</button>
-</div>`;
-}).join('')}
-</div>
-
-${e.questoes.length>0?`
-<details>
-<summary class="text-lg font-bold text-gray-700 mb-3 cursor-pointer list-none select-none">📋 Histórico (${e.questoes.length}) ▼</summary>
-<div class="max-h-80 overflow-y-auto space-y-2 mt-3">
-${e.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
-<div class="border-l-4 border-purple-400 bg-white rounded-lg p-3 flex justify-between items-center gap-3">
-  <div class="min-w-0">
-    <p class="text-sm font-bold text-gray-700">${q.data} — ${q.ma}</p>
-    <p class="text-xs text-gray-500">${q.qtd} questões</p>
-  </div>
-  <button onclick="delQuestao(${q.id})" class="text-red-500 hover:text-red-700 text-sm font-bold">🗑️</button>
-</div>`).join('')}
-</div>
-</details>`:'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhuma questão registrada ainda. Clique em "+ Questões" numa matéria acima.</p>'}
-`:''}
-
-</div>`;
-
-  window.registrarAulas = registrarAulas;
-  window.mkR = mkR;
-  window.editData = editData;
-  window.registrarQuestoes = registrarQuestoes;
-  window.delQuestao = delQuestao;
-  window.exp = exp;
-  window.imp = imp;
-  window.rst = rst;
-  window.showUserId = showUserId;
-  window.e = e;
-  window.rend = rend;
-}
-
-loadFromCloud();
-</script>
+    new App();
+  </script>
 </body>
 </html>
