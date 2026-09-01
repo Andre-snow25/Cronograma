@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cronograma PC SP 2026 - Nuvem</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+body{font-family:system-ui}
+.fade{animation:f .3s}
+@keyframes f{from{opacity:0}to{opacity:1}}
+.tab-active{border-bottom:3px solid #4f46e5;color:#4f46e5}
+textarea{resize:vertical;min-height:60px}
+.sync-indicator{animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+</style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
+<div id="n" class="fixed top-4 right-4 z-50"></div>
+<div id="modal-root"></div>
+<style>
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;}
+.modal-box{background:#fff;border-radius:16px;padding:28px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+</style>
+<div id="sync-status" class="fixed top-4 left-4 z-50"></div>
+<div id="app" class="max-w-7xl mx-auto"></div>
+
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+import { getFirestore, doc, setDoc, getDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
+  authDomain: "cronograma-d352c.firebaseapp.com",
+  projectId: "cronograma-d352c",
+  storageBucket: "cronograma-d352c.firebasestorage.app",
+  messagingSenderId: "1035295977614",
+  appId: "1:1035295977614:web:e4ef9bfd959470f0b759df"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+let userId = localStorage.getItem('userId');
+if (!userId) {
+  userId = 'user_' + Math.random().toString(36).substr(2, 9);
+  localStorage.setItem('userId', userId);
+}
+
+// ===== ESTADO =====
+// Agora o app suporta MÚLTIPLOS CRONOGRAMAS (ex: Cronograma X, Cronograma Y),
+// cada um com suas próprias matérias, revisões, questões, estatísticas e PDs (pomodoros) — tudo separado.
+// e.cronogramas: [{ id, nome, cron:[], dias:[], revs:[], stats:{a,d,r}, titulos:{}, dataReprogramacao, questoes:[], pomodoros:[] }]
+let e = { currentCronoId: null, aba: 'plano', cronogramas: [] };
+let syncEnabled = true;
+let isLoading = true;
+
+function currentC(){
+  return e.cronogramas.find(c => c.id === e.currentCronoId) || e.cronogramas[0];
+}
+
+function garantirCronogramaPadrao(){
+  if(!e.cronogramas || e.cronogramas.length === 0){
+    const c = novoCronogramaObj('Cronograma X');
+    e.cronogramas = [c];
+    e.currentCronoId = c.id;
+  }
+  if(!e.currentCronoId || !e.cronogramas.find(c=>c.id===e.currentCronoId)){
+    e.currentCronoId = e.cronogramas[0].id;
+  }
+}
+
+function novoCronogramaObj(nome){
+  return {
+    id: 'cr' + Date.now() + Math.random().toString(36).substr(2,4),
+    nome,
+    cron: [], dias: [], revs: [],
+    stats: {a:0,d:0,r:0},
+    titulos: {}, dataReprogramacao: null,
+    questoes: [], pomodoros: []
+  };
+}
+
+// Migra dados antigos (formato de 1 cronograma só) para o novo formato com múltiplos cronogramas
+function migrar(data){
+  if(data.cronogramas && data.cronogramas.length){
+    e = data;
+    e.cronogramas.forEach(c=>{
+      if(!c.pomodoros) c.pomodoros=[];
+      if(!c.titulos) c.titulos={};
+      if(!c.questoes) c.questoes=[];
+      if(c.dataReprogramacao===undefined) c.dataReprogramacao=null;
+    });
+    if(!e.aba) e.aba='plano';
+    garantirCronogramaPadrao();
+    return true;
+  }
+  if(data.cron){
+    const legacy = {
+      id: 'cr-legacy',
+      nome: 'Cronograma X',
+      cron: data.cron || [],
+      dias: data.dias || [],
+      revs: data.revs || [],
+      stats: data.stats || {a:0,d:0,r:0},
+      titulos: data.titulos || {},
+      dataReprogramacao: data.dataReprogramacao || null,
+      questoes: data.questoes || [],
+      pomodoros: data.pomodoros || []
+    };
+    e = { currentCronoId: legacy.id, aba: data.aba || 'plano', cronogramas: [legacy] };
+    return true;
+  }
+  return false;
+}
+
+function showSyncStatus(msg, type='info') {
+  const colors = {info:'bg-blue-500',success:'bg-green-500',error:'bg-red-500',syncing:'bg-yellow-500'};
+  const icons = {info:'☁️',success:'✅',error:'❌',syncing:'🔄'};
+  document.getElementById('sync-status').innerHTML = `
+    <div class="${colors[type]} text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 ${type==='syncing'?'sync-indicator':''}">
+      <span>${icons[type]}</span><span class="text-sm font-medium">${msg}</span>
+    </div>`;
+  if(type!=='syncing') setTimeout(()=>{document.getElementById('sync-status').innerHTML='';},3000);
+}
+
+async function saveToCloud() {
+  if(!syncEnabled) return;
+  try {
+    showSyncStatus('Sincronizando...','syncing');
+    const docRef = doc(db,'cronogramas',userId);
+    await setDoc(docRef,{...e,lastUpdated:new Date().toISOString()});
+    showSyncStatus('Salvo na nuvem!','success');
+  } catch(error) {
+    console.error('Erro ao salvar:',error);
+    showSyncStatus('Erro ao sincronizar','error');
+  }
+  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
+}
+
+async function loadFromCloud() {
+  try {
+    showSyncStatus('Carregando da nuvem...','syncing');
+    const docRef = doc(db,'cronogramas',userId);
+    const docSnap = await getDoc(docRef);
+    if(docSnap.exists()) {
+      const data = docSnap.data();
+      if(!migrar(data)) garantirCronogramaPadrao();
+      showSyncStatus('Carregado da nuvem!','success');
+    } else {
+      garantirCronogramaPadrao();
+      await saveToCloud();
+    }
+    isLoading=false;
+    rend();
+    setupRealtimeSync();
+  } catch(error) {
+    console.error('Erro ao carregar:',error);
+    showSyncStatus('Erro ao carregar','error');
+    ld();
+    isLoading=false;
+    rend();
+  }
+}
+
+function setupRealtimeSync() {
+  const docRef = doc(db,'cronogramas',userId);
+  onSnapshot(docRef,(snap)=>{
+    if(snap.exists()&&!isLoading){
+      const data=snap.data();
+      const currentUpdate=e.lastUpdated||'';
+      const cloudUpdate=data.lastUpdated||'';
+      if(cloudUpdate>currentUpdate){
+        migrar(data);
+        rend();
+        ntf('🔄 Atualizado de outro dispositivo!');
+      }
+    }
+  });
+}
+
+function sv(){
+  saveToCloud();
+  try{localStorage.setItem('cron2',JSON.stringify(e))}catch{}
+}
+
+function ld(){
+  try{
+    const s=localStorage.getItem('cron2');
+    if(s) migrar(JSON.parse(s));
+  }catch{}
+  garantirCronogramaPadrao();
+}
+
+function ntf(msg,tp='ok'){
+  const cor={ok:'bg-green-500',er:'bg-red-500',warn:'bg-yellow-500'};
+  const dv=document.createElement('div');
+  dv.className=`${cor[tp]} text-white px-6 py-3 rounded-lg shadow-lg mb-2`;
+  dv.textContent=msg;
+  document.getElementById('n').appendChild(dv);
+  setTimeout(()=>dv.remove(),3000);
+}
+
+// ===== CRONOGRAMAS (X, Y, ...) =====
+function novoCronograma(){
+  const sugestao = 'Cronograma ' + String.fromCharCode(88 + e.cronogramas.length); // X, Y, Z...
+  const nome = prompt('Nome do novo cronograma:', sugestao);
+  if(!nome) return;
+  const c = novoCronogramaObj(nome);
+  e.cronogramas.push(c);
+  e.currentCronoId = c.id;
+  sv();rend();
+  ntf(`📁 ${nome} criado!`);
+}
+function renomearCronograma(){
+  const c = currentC();
+  const nome = prompt('Novo nome do cronograma:', c.nome);
+  if(!nome) return;
+  c.nome = nome; sv();rend();
+}
+function excluirCronograma(){
+  if(e.cronogramas.length<=1){ntf('❌ Mantenha ao menos um cronograma','er');return;}
+  if(!confirm(`Excluir "${currentC().nome}" e TODOS os seus dados (matérias, revisões, questões, PDs)? Isso não pode ser desfeito.`)) return;
+  e.cronogramas = e.cronogramas.filter(c=>c.id!==e.currentCronoId);
+  e.currentCronoId = e.cronogramas[0].id;
+  sv();rend();
+}
+function trocarCronograma(id){
+  e.currentCronoId = id;
+  rend();
+}
+
+// ===== MATÉRIAS (por cronograma) =====
+function addMateria(){
+  const nomeEl = document.getElementById('nova-materia-nome');
+  const aulasEl = document.getElementById('nova-materia-aulas');
+  const nome = nomeEl.value.trim();
+  const aulas = parseInt(aulasEl.value)||0;
+  if(!nome || aulas<=0){ntf('❌ Informe o nome da matéria e a quantidade de aulas','er');return;}
+  const c = currentC();
+  c.cron.push({id:'m'+Date.now()+Math.random().toString(36).substr(2,4), ma:nome, aulasTotal:aulas, aulasConcluidas:0, concluido:false});
+  nomeEl.value=''; aulasEl.value='';
+  sv();rend();
+  ntf(`✅ ${nome} adicionada ao ${c.nome}!`);
+}
+function delMateria(id){
+  const c = currentC();
+  const item = c.cron.find(x=>x.id===id);
+  if(!item) return;
+  if(!confirm(`Remover "${item.ma}" deste cronograma? O histórico de revisões e questões dessa matéria não será apagado.`)) return;
+  c.cron = c.cron.filter(x=>x.id!==id);
+  sv();rend();
+}
+
+// Helpers de data
+function parseDMY(s){const[d,m,y]=s.split('/');return new Date(+y,+m-1,+d);}
+function fmtDMY(d){return d.toLocaleDateString('pt-BR');}
+function addDias(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+
+// Gera as 4 revisões respeitando máx 2/dia, a partir da data escolhida pelo usuário
+function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas=''){
+  const c = currentC();
+  const intervalos=[
+    {t:'7d',  dias:0,  cor:'amber'},
+    {t:'14d', dias:7,  cor:'orange'},
+    {t:'30d', dias:23, cor:'purple'},
+    {t:'60d', dias:53, cor:'blue'}
+  ];
+  const cnt={};
+  c.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+
+  intervalos.forEach(({t,dias,cor})=>{
+    let d=addDias(data1,dias);
+    for(let i=0;i<365;i++){
+      const k=fmtDMY(d);
+      if((cnt[k]||0)<2){
+        cnt[k]=(cnt[k]||0)+1;
+        c.revs.push({
+          id:`${dsId}-${t}-${Math.random().toString(36).substr(2,4)}`,
+          di:dsId,ma,i:de,f:ate,q:qtd,titulo:notas,dr:k,t,s:'p',cor
+        });
+        break;
+      }
+      d=addDias(d,1);
+    }
+  });
+}
+
+// Abre modal para registrar estudo
+function registrarAulas(id){
+  const c = currentC();
+  const item = c.cron.find(x=>x.id===id);
+  if(!item) return;
+  const restante = item.aulasTotal - item.aulasConcluidas;
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const sug = addDias(hoje,7);
+  const sugISO = sug.getFullYear()+'-'+String(sug.getMonth()+1).padStart(2,'0')+'-'+String(sug.getDate()).padStart(2,'0');
+
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade">
+        <h3 class="text-lg font-bold mb-1">📚 Registrar estudo</h3>
+        <p class="text-sm text-gray-500 mb-4">${item.ma} <span class="text-gray-300">·</span> ${c.nome}</p>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Quantas aulas você estudou?</label>
+        <div class="flex items-center gap-3 mb-4">
+          <input id="m-qtd" type="number" min="1" max="${restante}" value="1"
+            class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold focus:border-indigo-500 focus:outline-none">
+          <span class="text-sm text-gray-400">de ${restante} restantes</span>
+        </div>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data da 1ª revisão</label>
+        <input id="m-data1" type="date" value="${sugISO}"
+          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-1 focus:border-indigo-500 focus:outline-none">
+        <p class="text-xs text-gray-400 mb-4">As demais revisões serão calculadas a partir desta data.</p>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📝 Conteúdo estudado (opcional)</label>
+        <textarea id="m-notas" placeholder="Ex: Art. 1 ao Art. 10 — Princípios do Direito Penal"
+          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-5 text-sm focus:border-indigo-500 focus:outline-none" rows="3"></textarea>
+
+        <div class="flex gap-3">
+          <button id="m-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="m-confirmar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Confirmar</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('m-cancelar').onclick = () => {
+    document.getElementById('modal-root').innerHTML = '';
+  };
+
+  document.getElementById('m-confirmar').onclick = () => {
+    const qtd = parseInt(document.getElementById('m-qtd').value)||0;
+    const dataStr = document.getElementById('m-data1').value;
+    if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de aulas','er');return;}
+    if(!dataStr){ntf('❌ Informe a data da 1ª revisão','er');return;}
+    const real = Math.min(qtd, restante);
+    const [y,m,d] = dataStr.split('-');
+    const data1 = new Date(+y,+m-1,+d);
+    const de = item.aulasConcluidas+1;
+    const ate = item.aulasConcluidas+real;
+    item.aulasConcluidas += real;
+    if(item.aulasConcluidas>=item.aulasTotal) item.concluido=true;
+    c.stats.a += real;
+    c.stats.d++;
+    const notas = document.getElementById('m-notas').value.trim();
+    const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:notas};
+    c.dias.push(ds);
+    gerarRevisoes(ds.id, item.ma, de, ate, real, data1, notas);
+    document.getElementById('modal-root').innerHTML = '';
+    sv();rend();
+    ntf(`🎉 +${real} aulas em ${item.ma}!`);
+  };
+}
+
+function mkR(id){
+  const c = currentC();
+  const r=c.revs.find(x=>x.id===id);
+  if(r){r.s='c';c.stats.r++;sv();rend();ntf('✅ Revisão OK!');}
+}
+
+function editData(id){
+  const c = currentC();
+  const r=c.revs.find(x=>x.id===id);
+  if(!r) return;
+  const novaData=prompt('📅 Nova data da revisão (dd/mm/aaaa):',r.dr);
+  if(novaData&&/^\d{2}\/\d{2}\/\d{4}$/.test(novaData)){
+    r.dr=novaData;sv();rend();ntf('📅 Data atualizada!');
+  }else if(novaData){
+    ntf('❌ Formato inválido! Use dd/mm/aaaa','er');
+  }
+}
+
+// ===== QUESTÕES =====
+function registrarQuestoes(ma){
+  const hoje=new Date();
+  const hojeISO = hoje.getFullYear()+'-'+String(hoje.getMonth()+1).padStart(2,'0')+'-'+String(hoje.getDate()).padStart(2,'0');
+
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade">
+        <h3 class="text-lg font-bold mb-1">✍️ Registrar questões</h3>
+        <p class="text-sm text-gray-500 mb-4">${ma}</p>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Quantas questões você resolveu?</label>
+        <input id="q-qtd" type="number" min="1" value="10"
+          class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold mb-4 focus:border-purple-500 focus:outline-none">
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data</label>
+        <input id="q-data" type="date" value="${hojeISO}"
+          class="w-full border-2 border-gray-300 rounded-lg p-2 mb-5 focus:border-purple-500 focus:outline-none">
+
+        <div class="flex gap-3">
+          <button id="q-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="q-confirmar" class="flex-1 bg-purple-600 text-white rounded-lg py-2.5 font-semibold hover:bg-purple-700">Confirmar</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('q-cancelar').onclick = () => {
+    document.getElementById('modal-root').innerHTML = '';
+  };
+
+  document.getElementById('q-confirmar').onclick = () => {
+    const qtd = parseInt(document.getElementById('q-qtd').value)||0;
+    const dataStr = document.getElementById('q-data').value;
+    if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de questões','er');return;}
+    if(!dataStr){ntf('❌ Informe a data','er');return;}
+    const [y,m,d] = dataStr.split('-');
+    const dataFmt = `${d}/${m}/${y}`;
+    currentC().questoes.push({id:Date.now(),ma,data:dataFmt,qtd});
+    document.getElementById('modal-root').innerHTML = '';
+    sv();rend();
+    ntf(`🎉 +${qtd} questões em ${ma}!`);
+  };
+}
+
+function delQuestao(id){
+  if(!confirm('Remover este registro?')) return;
+  const c = currentC();
+  c.questoes = c.questoes.filter(q=>q.id!==id);
+  sv();rend();
+  ntf('🗑️ Removido');
+}
+
+function diasAtras(n){
+  const arr=[];
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  for(let i=n-1;i>=0;i--) arr.push(fmtDMY(addDias(hoje,-i)));
+  return arr;
+}
+
+function questoesPorDia(n=14){
+  const dias=diasAtras(n);
+  const mapa={};
+  currentC().questoes.forEach(q=>{mapa[q.data]=(mapa[q.data]||0)+q.qtd;});
+  return dias.map(d=>({data:d,qtd:mapa[d]||0}));
+}
+function questoesHoje(){
+  const hj=fmtDMY(new Date());
+  return currentC().questoes.filter(q=>q.data===hj).reduce((s,q)=>s+q.qtd,0);
+}
+function questoesSemana(){
+  const dias=diasAtras(7);
+  return currentC().questoes.filter(q=>dias.includes(q.data)).reduce((s,q)=>s+q.qtd,0);
+}
+function questoesMes(){
+  const dias=diasAtras(30);
+  return currentC().questoes.filter(q=>dias.includes(q.data)).reduce((s,q)=>s+q.qtd,0);
+}
+function questoesTotal(){
+  return currentC().questoes.reduce((s,q)=>s+q.qtd,0);
+}
+function mediaDiariaSemana(){
+  return (questoesSemana()/7).toFixed(1);
+}
+
+// ===== PDs / POMODORO (por cronograma) =====
+const POMO_DURACAO = 25*60;
+let pomoSegundos = POMO_DURACAO;
+let pomoRodando = false;
+let pomoIntervalId = null;
+
+function pomoFmt(s){
+  const m=Math.floor(s/60).toString().padStart(2,'0');
+  const ss=(s%60).toString().padStart(2,'0');
+  return `${m}:${ss}`;
+}
+function pomoToggle(){
+  if(pomoRodando){
+    pomoRodando=false; clearInterval(pomoIntervalId);
+  } else {
+    pomoRodando=true;
+    pomoIntervalId=setInterval(pomoTick,1000);
+  }
+  rend();
+}
+function pomoTick(){
+  pomoSegundos--;
+  const disp = document.getElementById('pomo-display');
+  if(disp) disp.textContent = pomoFmt(pomoSegundos);
+  if(pomoSegundos<=0){
+    clearInterval(pomoIntervalId); pomoRodando=false;
+    currentC().pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR')});
+    sv();
+    pomoSegundos = POMO_DURACAO;
+    rend();
+    ntf('🍅 PD concluído! +25min registrados.');
+  }
+}
+function pomoReset(){
+  pomoRodando=false; clearInterval(pomoIntervalId);
+  pomoSegundos = POMO_DURACAO;
+  rend();
+}
+
+function pomodorosPorDia(n=14){
+  const dias=diasAtras(n);
+  const mapa={};
+  currentC().pomodoros.forEach(p=>{mapa[p.data]=(mapa[p.data]||0)+1;});
+  return dias.map(d=>({data:d,qtd:mapa[d]||0}));
+}
+function pomodorosHoje(){
+  const hj=fmtDMY(new Date());
+  return currentC().pomodoros.filter(p=>p.data===hj).length;
+}
+function pomodorosSemana(){
+  const dias=diasAtras(7);
+  return currentC().pomodoros.filter(p=>dias.includes(p.data)).length;
+}
+function pomodorosTotal(){
+  return currentC().pomodoros.length;
+}
+function minutosSemana(){
+  return pomodorosSemana()*25;
+}
+
+// Gráfico de barras (SVG) genérico
+function svgBarChart(dados, color){
+  const max=Math.max(...dados.map(d=>d.qtd),1);
+  const w=760,h=190,padB=34,padT=20,padL=10,padR=10;
+  const areaW=w-padL-padR;
+  const bw=areaW/dados.length;
+  const bars=dados.map((d,i)=>{
+    const bh=max>0?(d.qtd/max)*(h-padT-padB):0;
+    const x=padL+i*bw+bw*0.15;
+    const bwReal=bw*0.7;
+    const y=h-padB-bh;
+    const [dd,mm]=d.data.split('/');
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bwReal.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="${color}"/>
+    ${d.qtd>0?`<text x="${(x+bwReal/2).toFixed(1)}" y="${(y-4).toFixed(1)}" font-size="10" text-anchor="middle" fill="#374151" font-weight="bold">${d.qtd}</text>`:''}
+    <text x="${(x+bwReal/2).toFixed(1)}" y="${h-padB+14}" font-size="9" text-anchor="middle" fill="#6b7280">${dd}/${mm}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" class="w-full">
+    <line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="#e5e7eb"/>
+    ${bars}
+  </svg>`;
+}
+function svgChartDias(n=14){ return svgBarChart(questoesPorDia(n), '#7c3aed'); }
+function svgChartPomodoros(n=14){ return svgBarChart(pomodorosPorDia(n), '#f97316'); }
+
+function exp(){
+  const b=new Blob([JSON.stringify(e,null,2)],{type:'application/json'});
+  const u=URL.createObjectURL(b);
+  const a=document.createElement('a');
+  a.href=u;a.download=`backup-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();URL.revokeObjectURL(u);ntf('💾 Exportado!');
+}
+
+function imp(ev){
+  const f=ev.target.files[0];if(!f) return;
+  const r=new FileReader();
+  r.onload=x=>{
+    try{
+      const data = JSON.parse(x.target.result);
+      if(!migrar(data)) throw new Error('formato inválido');
+      sv();rend();ntf('📥 Importado!');
+    }catch{ntf('❌ Erro','er');}
+  };
+  r.readAsText(f);
+}
+
+function rst(){
+  if(confirm('⚠️ Resetar TUDO (todos os cronogramas)? Isto apagará os dados da nuvem também!')){
+    e = { currentCronoId:null, aba:'plano', cronogramas:[] };
+    garantirCronogramaPadrao();
+    saveToCloud().then(()=>{localStorage.removeItem('cron2');location.reload();});
+  }
+}
+
+function showUserId(){
+  const newId=prompt('🆔 Seu ID de usuário (copie para usar em outro dispositivo):',userId);
+  if(newId&&newId!==userId&&confirm('Deseja trocar para este ID? Isso carregará os dados desse usuário.')){
+    userId=newId;
+    localStorage.setItem('userId',userId);
+    location.reload();
+  }
+}
+
+function rend(){
+  const c = currentC();
+  const pd=c.revs.filter(x=>x.s==='p').length;
+  const ta=c.cron.reduce((s,m)=>s+m.aulasTotal,0);
+  const pg= ta>0 ? (c.stats.a/ta*100).toFixed(1) : '0.0';
+
+  const pendentes = c.cron.filter(x=>!x.concluido);
+  const concluidas = c.cron.filter(x=>x.concluido);
+
+  document.getElementById('app').innerHTML=`
+<div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+<div class="flex justify-between items-start gap-4 mb-4 flex-wrap">
+<div>
+  <h1 class="text-3xl font-bold">📚 Cronograma PC SP 2026</h1>
+  <p class="text-gray-600">Sistema de Revisão Espaçada com Nuvem ☁️</p>
+  <button onclick="showUserId()" class="text-xs text-blue-600 hover:underline mt-1">🆔 ID: ${userId.substr(0,12)}...</button>
+</div>
+<div class="flex gap-2 flex-wrap">
+<button onclick="exp()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 text-sm font-medium">💾 Exportar</button>
+<label class="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 text-sm font-medium cursor-pointer">📥 Importar<input type="file" accept=".json" onchange="imp(event)" class="hidden"></label>
+<button onclick="rst()" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 text-sm font-medium">🔄 Resetar</button>
+</div>
+</div>
+
+<div class="flex items-center gap-2 flex-wrap border-t pt-4">
+  <span class="text-sm font-bold text-gray-500">📁 Cronograma:</span>
+  <select onchange="trocarCronograma(this.value)" class="border-2 border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-indigo-700 focus:border-indigo-500 focus:outline-none">
+    ${e.cronogramas.map(cr=>`<option value="${cr.id}" ${cr.id===e.currentCronoId?'selected':''}>${cr.nome}</option>`).join('')}
+  </select>
+  <button onclick="novoCronograma()" class="bg-indigo-100 text-indigo-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-200">+ Novo</button>
+  <button onclick="renomearCronograma()" class="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-gray-200">✏️ Renomear</button>
+  ${e.cronogramas.length>1?`<button onclick="excluirCronograma()" class="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-bold hover:bg-red-100">🗑️ Excluir</button>`:''}
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+<div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl"><p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p><p class="text-3xl font-bold text-indigo-700">${c.stats.a}</p><p class="text-xs text-indigo-600">de ${ta}</p></div>
+<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">📖 Matérias</p><p class="text-3xl font-bold text-green-700">${concluidas.length}</p><p class="text-xs text-green-600">de ${c.cron.length} concluídas</p></div>
+<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📊 Progresso</p><p class="text-3xl font-bold text-purple-700">${pg}%</p></div>
+<div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p><p class="text-3xl font-bold text-orange-700">${pd}</p><p class="text-xs text-orange-600">${c.stats.r} completas</p></div>
+</div>
+</div>
+
+<div class="bg-white rounded-t-2xl shadow-xl">
+<div class="flex border-b overflow-x-auto">
+<button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
+<button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
+<button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
+<button onclick="e.aba='foco';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='foco'?'tab-active':'text-gray-600 hover:text-gray-800'}">🍅 Foco (PD)</button>
+</div>
+</div>
+
+<div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
+
+${e.aba==='plano'?`
+<h2 class="text-2xl font-bold mb-4">📋 Plano de Estudo — ${c.nome}</h2>
+
+<div class="bg-gray-50 rounded-xl p-4 mb-8">
+  <h3 class="font-bold text-gray-700 mb-3">➕ Adicionar matéria a este cronograma</h3>
+  <div class="flex gap-3 flex-wrap items-end">
+    <div class="flex-1 min-w-[200px]">
+      <label class="block text-xs font-bold text-gray-500 mb-1">Nome da matéria</label>
+      <input id="nova-materia-nome" type="text" placeholder="Ex: Direito Penal – Parte Geral" class="w-full border-2 border-gray-300 rounded-lg p-2 focus:border-indigo-500 focus:outline-none">
+    </div>
+    <div>
+      <label class="block text-xs font-bold text-gray-500 mb-1">Qtd. de aulas</label>
+      <input id="nova-materia-aulas" type="number" min="1" placeholder="Ex: 40" class="w-28 border-2 border-gray-300 rounded-lg p-2 focus:border-indigo-500 focus:outline-none">
+    </div>
+    <button onclick="addMateria()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold">Adicionar</button>
+  </div>
+</div>
+
+<div class="mb-10">
+<h3 class="text-xl font-bold text-yellow-700 mb-4">⏳ Pendentes (${pendentes.length})</h3>
+${pendentes.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhuma matéria pendente. Adicione matérias acima.</p>':`<div class="grid md:grid-cols-2 gap-3">
+${pendentes.map(item=>{
+  const pct = Math.round(item.aulasConcluidas/item.aulasTotal*100);
+  return `<div class="border-2 border-yellow-300 bg-yellow-50 rounded-xl p-4 hover:shadow-lg transition-all">
+  <div class="flex justify-between items-start gap-3 mb-3">
+    <div class="flex-1 min-w-0">
+      <h4 class="font-bold text-gray-800 break-words mb-1">${item.ma}</h4>
+      <div class="flex gap-2 text-xs flex-wrap">
+        <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">📚 ${item.aulasTotal} aulas</span>
+        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${item.aulasConcluidas} feitas</span>
+        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${item.aulasTotal-item.aulasConcluidas} restantes</span>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1 flex-shrink-0">
+      <button onclick="registrarAulas('${item.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap shadow-md">+ Estudei</button>
+      <button onclick="delMateria('${item.id}')" class="text-red-500 hover:text-red-700 text-xs font-bold">remover</button>
+    </div>
+  </div>
+  <div class="w-full bg-gray-200 rounded-full h-2">
+    <div class="bg-indigo-500 h-2 rounded-full transition-all" style="width:${pct}%"></div>
+  </div>
+  <p class="text-xs text-gray-400 mt-1">${pct}% concluído</p>
+</div>`;
+}).join('')}
+</div>`}
+</div>
+
+${concluidas.length>0?`
+<details>
+<summary class="text-xl font-bold text-green-700 mb-4 cursor-pointer list-none select-none">✅ Finalizadas (${concluidas.length}) ▼</summary>
+<div class="grid md:grid-cols-2 gap-3 mt-4">
+${concluidas.map(item=>`
+<div class="border-2 border-green-300 bg-green-50 rounded-xl p-4">
+  <div class="flex justify-between items-start gap-3">
+    <div class="flex-1 min-w-0">
+      <h4 class="font-bold text-gray-800 line-through opacity-60 break-words mb-1">${item.ma}</h4>
+      <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">📚 ${item.aulasTotal} aulas</span>
+    </div>
+    <span class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex-shrink-0">✓ Feito</span>
+  </div>
+</div>`).join('')}
+</div>
+</details>`:''}
+`:''}
+
+${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data — ${c.nome}</h2>${c.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${c.revs.filter(x=>x.s==='p').length})</h3>${c.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${c.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${c.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${c.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${c.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div></div>`:''}`}</div>`:''}
+
+${e.aba==='questoes'?`
+<h2 class="text-2xl font-bold mb-6">✍️ Questões — ${c.nome}</h2>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+<div class="bg-gradient-to-br from-pink-100 to-pink-200 p-4 rounded-xl"><p class="text-sm font-bold text-pink-900 mb-1">📅 Hoje</p><p class="text-3xl font-bold text-pink-700">${questoesHoje()}</p></div>
+<div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📆 7 dias</p><p class="text-3xl font-bold text-purple-700">${questoesSemana()}</p><p class="text-xs text-purple-600">média ${mediaDiariaSemana()}/dia</p></div>
+<div class="bg-gradient-to-br from-blue-100 to-blue-200 p-4 rounded-xl"><p class="text-sm font-bold text-blue-900 mb-1">🗓️ 30 dias</p><p class="text-3xl font-bold text-blue-700">${questoesMes()}</p></div>
+<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">🎯 Total</p><p class="text-3xl font-bold text-green-700">${questoesTotal()}</p></div>
+</div>
+
+<div class="bg-gray-50 rounded-xl p-4 mb-8">
+<h3 class="font-bold text-gray-700 mb-3">📊 Questões resolvidas — últimos 14 dias</h3>
+${svgChartDias(14)}
+</div>
+
+<h3 class="text-xl font-bold text-gray-800 mb-4">📖 Por matéria</h3>
+${c.cron.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg mb-8">Cadastre matérias na aba Plano para registrar questões por matéria.</p>':`<div class="grid md:grid-cols-2 gap-3 mb-8">
+${c.cron.map(item=>{
+  const qtd = c.questoes.filter(q=>q.ma===item.ma).reduce((s,q)=>s+q.qtd,0);
+  return `<div class="border-2 border-purple-200 bg-purple-50 rounded-xl p-4 flex justify-between items-center gap-3">
+  <div class="min-w-0">
+    <h4 class="font-bold text-gray-800 break-words">${item.ma}</h4>
+    <span class="text-sm text-purple-700 font-bold">${qtd} questões resolvidas</span>
+  </div>
+  <button onclick="registrarQuestoes('${item.ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Questões</button>
+</div>`;
+}).join('')}
+</div>`}
+
+${c.questoes.length>0?`
+<details>
+<summary class="text-lg font-bold text-gray-700 mb-3 cursor-pointer list-none select-none">📋 Histórico (${c.questoes.length}) ▼</summary>
+<div class="max-h-80 overflow-y-auto space-y-2 mt-3">
+${c.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
+<div class="border-l-4 border-purple-400 bg-white rounded-lg p-3 flex justify-between items-center gap-3">
+  <div class="min-w-0">
+    <p class="text-sm font-bold text-gray-700">${q.data} — ${q.ma}</p>
+    <p class="text-xs text-gray-500">${q.qtd} questões</p>
+  </div>
+  <button onclick="delQuestao(${q.id})" class="text-red-500 hover:text-red-700 text-sm font-bold">🗑️</button>
+</div>`).join('')}
+</div>
+</details>`:'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhuma questão registrada ainda.</p>'}
+`:''}
+
+${e.aba==='foco'?`
+<h2 class="text-2xl font-bold mb-2">🍅 Foco — ${c.nome}</h2>
+<p class="text-gray-500 text-sm mb-6">Cada PD (Pomodoro de Estudo) dura 25 minutos. Clique em iniciar quando começar a estudar; o tempo é contabilizado automaticamente ao terminar.</p>
+
+<div class="flex flex-col items-center bg-gray-50 rounded-2xl p-8 mb-8">
+  <div id="pomo-display" class="text-6xl font-bold text-orange-600 mb-6 tabular-nums">${pomoFmt(pomoSegundos)}</div>
+  <div class="flex gap-3">
+    <button onclick="pomoToggle()" class="bg-orange-500 hover:bg-orange-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md">${pomoRodando?'⏸ Pausar':'▶ Iniciar PD'}</button>
+    <button onclick="pomoReset()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-bold">↺ Reiniciar</button>
+  </div>
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+<div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">📅 PDs hoje</p><p class="text-3xl font-bold text-orange-700">${pomodorosHoje()}</p></div>
+<div class="bg-gradient-to-br from-amber-100 to-amber-200 p-4 rounded-xl"><p class="text-sm font-bold text-amber-900 mb-1">📆 PDs 7 dias</p><p class="text-3xl font-bold text-amber-700">${pomodorosSemana()}</p></div>
+<div class="bg-gradient-to-br from-yellow-100 to-yellow-200 p-4 rounded-xl"><p class="text-sm font-bold text-yellow-900 mb-1">⏱️ Minutos/semana</p><p class="text-3xl font-bold text-yellow-700">${minutosSemana()}</p></div>
+<div class="bg-gradient-to-br from-red-100 to-red-200 p-4 rounded-xl"><p class="text-sm font-bold text-red-900 mb-1">🎯 PDs no total</p><p class="text-3xl font-bold text-red-700">${pomodorosTotal()}</p></div>
+</div>
+
+<div class="bg-gray-50 rounded-xl p-4">
+<h3 class="font-bold text-gray-700 mb-3">📊 PDs concluídos — últimos 14 dias</h3>
+${svgChartPomodoros(14)}
+</div>
+`:''}
+
+</div>`;
+
+  window.novoCronograma = novoCronograma;
+  window.renomearCronograma = renomearCronograma;
+  window.excluirCronograma = excluirCronograma;
+  window.trocarCronograma = trocarCronograma;
+  window.addMateria = addMateria;
+  window.delMateria = delMateria;
+  window.registrarAulas = registrarAulas;
+  window.mkR = mkR;
+  window.editData = editData;
+  window.registrarQuestoes = registrarQuestoes;
+  window.delQuestao = delQuestao;
+  window.pomoToggle = pomoToggle;
+  window.pomoReset = pomoReset;
+  window.exp = exp;
+  window.imp = imp;
+  window.rst = rst;
+  window.showUserId = showUserId;
+  window.e = e;
+  window.rend = rend;
+}
+
+loadFromCloud();
+</script>
+</body>
+</html>
