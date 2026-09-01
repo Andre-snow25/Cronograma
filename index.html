@@ -77,7 +77,8 @@ function novoCronogramaObj(nome){
     cron: [], dias: [], revs: [],
     stats: {a:0,d:0,r:0},
     titulos: {}, dataReprogramacao: null,
-    questoes: [], pomodoros: []
+    questoes: [], pomodoros: [],
+    agenda: null, agendaConcluidos: {}
   };
 }
 
@@ -90,6 +91,8 @@ function migrar(data){
       if(!c.titulos) c.titulos={};
       if(!c.questoes) c.questoes=[];
       if(c.dataReprogramacao===undefined) c.dataReprogramacao=null;
+      if(c.agenda===undefined) c.agenda=null;
+      if(!c.agendaConcluidos) c.agendaConcluidos={};
     });
     if(!e.aba) e.aba='plano';
     garantirCronogramaPadrao();
@@ -249,6 +252,63 @@ function delMateria(id){
   if(!item) return;
   if(!confirm(`Remover "${item.ma}" deste cronograma? O histórico de revisões e questões dessa matéria não será apagado.`)) return;
   c.cron = c.cron.filter(x=>x.id!==id);
+  sv();rend();
+}
+
+// ===== AGENDA MESCLADA (por cronograma) =====
+// Gera um plano dia-a-dia com 2 matérias por dia, priorizando quem tem mais aulas restantes,
+// a partir das aulas AINDA NÃO concluídas de cada matéria pendente.
+function addDiasISO(iso,n){
+  const d=new Date(iso+'T00:00:00');
+  d.setDate(d.getDate()+n);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function fmtAgendaLabel(iso){
+  const d=new Date(iso+'T00:00:00');
+  const s = d.toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'});
+  return s.charAt(0).toUpperCase()+s.slice(1);
+}
+function hojeISO(){
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+function gerarAgenda(){
+  const c = currentC();
+  const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
+  if(pendentes.length===0){ntf('❌ Não há aulas pendentes neste cronograma para gerar agenda','er');return;}
+  const inputEl = document.getElementById('agenda-data-inicio');
+  const dataInicio = (inputEl && inputEl.value) || hojeISO();
+  if(c.agenda && !confirm('Já existe uma agenda gerada para este cronograma. Gerar de novo vai substituí-la (o progresso marcado será perdido). Continuar?')) return;
+
+  const remaining = pendentes.map(m=>({id:m.id, ma:m.ma, left:m.aulasTotal-m.aulasConcluidas}));
+  const dias=[];
+  let idx=0;
+  while(remaining.some(r=>r.left>0)){
+    const avail = remaining.filter(r=>r.left>0).sort((a,b)=>b.left-a.left);
+    let picks;
+    if(avail.length>=2){
+      picks = [avail[0], avail[1]];
+    } else {
+      picks = avail[0].left>=2 ? [avail[0], avail[0]] : [avail[0]];
+    }
+    const date = addDiasISO(dataInicio, idx);
+    dias.push({date, materias: picks.map(p=>({id:p.id, ma:p.ma}))});
+    picks.forEach(p=>{ const orig = remaining.find(r=>r.id===p.id); orig.left -= 1; });
+    idx += 1;
+  }
+
+  c.agenda = {dataInicio, dias};
+  c.agendaConcluidos = {};
+  sv();rend();
+  ntf('🗓️ Agenda mesclada gerada!');
+}
+
+function toggleAgendaItem(dateIso, materiaId){
+  const c = currentC();
+  const key = dateIso+'|'+materiaId;
+  if(c.agendaConcluidos[key]) delete c.agendaConcluidos[key];
+  else c.agendaConcluidos[key] = true;
   sv();rend();
 }
 
@@ -622,6 +682,7 @@ function rend(){
 <div class="bg-white rounded-t-2xl shadow-xl">
 <div class="flex border-b overflow-x-auto">
 <button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
+<button onclick="e.aba='agenda';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='agenda'?'tab-active':'text-gray-600 hover:text-gray-800'}">🗓️ Agenda</button>
 <button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
 <button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
 <button onclick="e.aba='foco';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='foco'?'tab-active':'text-gray-600 hover:text-gray-800'}">🍅 Foco (PD)</button>
@@ -693,6 +754,42 @@ ${concluidas.map(item=>`
 </div>`).join('')}
 </div>
 </details>`:''}
+`:''}
+
+${e.aba==='agenda'?`
+<h2 class="text-2xl font-bold mb-2">🗓️ Agenda mesclada — ${c.nome}</h2>
+<p class="text-gray-500 text-sm mb-6">Distribui 2 matérias por dia entre as aulas ainda não concluídas deste cronograma, priorizando quem tem mais aulas restantes.</p>
+
+<div class="bg-gray-50 rounded-xl p-4 mb-8">
+  <div class="flex gap-3 flex-wrap items-end">
+    <div>
+      <label class="block text-xs font-bold text-gray-500 mb-1">Data de início</label>
+      <input id="agenda-data-inicio" type="date" value="${c.agenda ? c.agenda.dataInicio : hojeISO()}" class="border-2 border-gray-300 rounded-lg p-2 focus:border-indigo-500 focus:outline-none">
+    </div>
+    <button onclick="gerarAgenda()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold">🗓️ Gerar agenda mesclada</button>
+  </div>
+</div>
+
+${!c.agenda ? `<p class="text-gray-400 text-center py-12 bg-gray-50 rounded-lg">Nenhuma agenda gerada ainda. Cadastre matérias no Plano e clique em "Gerar agenda mesclada".</p>` : `
+<div class="space-y-3 max-h-[560px] overflow-y-auto pr-1">
+${c.agenda.dias.map(dia=>{
+  const isHoje = dia.date === hojeISO();
+  return `<div class="border-l-4 ${isHoje?'border-indigo-500 bg-indigo-50':'border-gray-200 bg-white'} rounded-xl p-4">
+  <div class="flex items-center gap-2 mb-2">
+    <strong class="text-sm ${isHoje?'text-indigo-700':'text-gray-700'}">${fmtAgendaLabel(dia.date)}</strong>
+    ${isHoje?'<span class="bg-indigo-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">hoje</span>':''}
+  </div>
+  <div class="flex flex-wrap gap-2">
+  ${dia.materias.map(m=>{
+    const key = dia.date+'|'+m.id;
+    const done = !!c.agendaConcluidos[key];
+    return `<button onclick="toggleAgendaItem('${dia.date}','${m.id}')" class="text-sm px-3 py-2 rounded-lg font-bold border-2 ${done?'bg-green-100 border-green-300 text-green-700 line-through':'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'}">${done?'✓ ':''}${m.ma}</button>`;
+  }).join('')}
+  </div>
+</div>`;
+}).join('')}
+</div>
+`}
 `:''}
 
 ${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data — ${c.nome}</h2>${c.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${c.revs.filter(x=>x.s==='p').length})</h3>${c.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${c.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${c.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${c.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${c.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div></div>`:''}`}</div>`:''}
@@ -775,6 +872,8 @@ ${svgChartPomodoros(14)}
   window.trocarCronograma = trocarCronograma;
   window.addMateria = addMateria;
   window.delMateria = delMateria;
+  window.gerarAgenda = gerarAgenda;
+  window.toggleAgendaItem = toggleAgendaItem;
   window.registrarAulas = registrarAulas;
   window.mkR = mkR;
   window.editData = editData;
