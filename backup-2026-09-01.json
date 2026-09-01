@@ -1,0 +1,1057 @@
+{
+  "currentCronoId": "cr1788295646861e5ip",
+  "aba": "plano",
+  "cronogramas": [
+    {
+      "id": "cr1788295646861e5ip",
+      "nome": "Fotografo PC",
+      "cron": [
+        {
+          "id": "m1788297414809m9kw",
+          "ma": "Direito Penal - Parte Geral",
+          "aulasTotal": 17,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m17882974404257khr",
+          "ma": "Direito Penal - Parte Especial",
+          "aulasTotal": 15,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297456657cqcn",
+          "ma": "Direito Processual Penal",
+          "aulasTotal": 9,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m17882974860497gab",
+          "ma": "Legislação Penal Especial",
+          "aulasTotal": 9,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297495769w2yo",
+          "ma": "Criminologia",
+          "aulasTotal": 49,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297511673r5hz",
+          "ma": "Direito Constitucional",
+          "aulasTotal": 45,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m17882977104091tpy",
+          "ma": "Direitos Humanos",
+          "aulasTotal": 7,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297745608zcmy",
+          "ma": "Lei Orgânica da PC SP",
+          "aulasTotal": 50,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m17882977837603rlg",
+          "ma": "Português",
+          "aulasTotal": 91,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297820128lt3y",
+          "ma": "Raciocínio Lógico",
+          "aulasTotal": 101,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297854736d3hl",
+          "ma": "Informática",
+          "aulasTotal": 139,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m1788297872944whzo",
+          "ma": "Técnicas AudioVisuais",
+          "aulasTotal": 28,
+          "aulasConcluidas": 0,
+          "concluido": false
+        },
+        {
+          "id": "m17882978847686a3f",
+          "ma": "Matemática",
+          "aulasTotal": 18,
+          "aulasConcluidas": 0,
+          "concluido": false
+        }
+      ],
+      "dias": [],
+      "revs": [],
+      "stats": {
+        "a": 0,
+        "d": 0,
+        "r": 0
+      },
+      "titulos": {},
+      "dataReprogramacao": null,
+      "questoes": [],
+      "pomodoros": [],
+      "agenda": {
+        "dataInicio": "2026-09-01",
+        "dias": [
+          {
+            "date": "2026-09-01",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-02",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-03",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-04",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-05",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-06",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-07",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-08",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-09",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-10",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-11",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-12",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-13",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-14",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-15",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-16",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-17",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-18",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-19",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-20",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-21",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-22",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-23",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-24",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-25",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-26",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-27",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-28",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-29",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              }
+            ]
+          },
+          {
+            "date": "2026-09-30",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-01",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-02",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-03",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-04",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-05",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-06",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-07",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-08",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-09",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-10",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-11",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-12",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-13",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-14",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-15",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-16",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-17",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-18",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-19",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-20",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-21",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-22",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-23",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-24",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-25",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-26",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-27",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-28",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-29",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-30",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-10-31",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-01",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-02",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-03",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-04",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-05",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-06",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-07",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-08",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-09",
+            "materias": [
+              {
+                "id": "m1788297414809m9kw",
+                "ma": "Direito Penal - Parte Geral"
+              },
+              {
+                "id": "m17882974404257khr",
+                "ma": "Direito Penal - Parte Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-10",
+            "materias": [
+              {
+                "id": "m1788297456657cqcn",
+                "ma": "Direito Processual Penal"
+              },
+              {
+                "id": "m17882974860497gab",
+                "ma": "Legislação Penal Especial"
+              }
+            ]
+          },
+          {
+            "date": "2026-11-11",
+            "materias": [
+              {
+                "id": "m1788297495769w2yo",
+                "ma": "Criminologia"
+              },
+              {
+                "id": "m1788297511673r5hz",
+                "ma": "Direito Constitucional"
+              }
+            ]
+          }
+        ]
+      },
+      "agendaConcluidos": {}
+    }
+  ],
+  "lastUpdated": "2026-09-01T21:24:44.768Z"
+}
