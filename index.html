@@ -78,8 +78,59 @@ function novoCronogramaObj(nome){
     stats: {a:0,d:0,r:0},
     titulos: {}, dataReprogramacao: null,
     questoes: [], pomodoros: [],
-    agenda: null, agendaConcluidos: {}
+    agenda: null, agendaConcluidos: {},
+    rotina: rotinaPadrao()
   };
+}
+
+// Grade de rotina semanal (estilo planilha: dia x horário). As linhas (faixas
+// de horário) se repetem toda semana, mas o CONTEÚDO de cada célula é por
+// DATA real — cada semana tem seu próprio conteúdo, não fica repetindo.
+// celulas: chave `${linhaId}|${DD/MM/AAAA}` -> texto.
+// horasEstudo: chave `DD/MM/AAAA` -> valor.
+function rotinaPadrao(){
+  const linha = (horario) => ({ id:'rl'+Math.random().toString(36).substr(2,6), horario });
+  return {
+    linhas: [
+      linha('07:00 - 08:00'),
+      linha('08:00 - 12:00'),
+      linha('12:00 - 12:30'),
+      linha('12:30 - 13:00'),
+      linha('13:00 - 18:00'),
+      linha('18:00 - 19:00'),
+      linha('19:00 - 22:00')
+    ],
+    celulas: {},
+    horasEstudo: {}
+  };
+}
+const DIAS_SEMANA = ['Segunda','Terça','Quarta','Quinta','Sexta','Sábado','Domingo'];
+
+// Converte o formato antigo da rotina (um único conteúdo fixo por dia da
+// semana, repetido toda semana) pro formato novo por data — o que já tinha
+// sido digitado passa a valer só pra semana atual, daqui pra frente cada
+// semana é independente.
+function migrarRotinaParaDatas(rotina){
+  const linhaTemDiasAntigo = (rotina.linhas||[]).some(l=>Array.isArray(l.dias));
+  const horasEstudoEraArray = Array.isArray(rotina.horasEstudo);
+  if(!linhaTemDiasAntigo && !horasEstudoEraArray) return;
+  const segundaAtual = segundaDaSemana(0);
+  if(!rotina.celulas) rotina.celulas={};
+  (rotina.linhas||[]).forEach(l=>{
+    if(Array.isArray(l.dias)){
+      l.dias.forEach((texto,i)=>{
+        if(texto) rotina.celulas[l.id+'|'+fmtDMY(addDias(segundaAtual,i))]=texto;
+      });
+      delete l.dias;
+    }
+  });
+  if(horasEstudoEraArray){
+    const novo={};
+    rotina.horasEstudo.forEach((v,i)=>{
+      if(v) novo[fmtDMY(addDias(segundaAtual,i))]=v;
+    });
+    rotina.horasEstudo=novo;
+  }
 }
 
 // Migra dados antigos (formato de 1 cronograma só) para o novo formato com múltiplos cronogramas
@@ -93,6 +144,8 @@ function migrar(data){
       if(c.dataReprogramacao===undefined) c.dataReprogramacao=null;
       if(c.agenda===undefined) c.agenda=null;
       if(!c.agendaConcluidos) c.agendaConcluidos={};
+      if(!c.rotina) c.rotina=rotinaPadrao();
+      migrarRotinaParaDatas(c.rotina);
     });
     if(!e.aba) e.aba='plano';
     garantirCronogramaPadrao();
@@ -281,21 +334,36 @@ function gerarAgenda(){
   const dataInicio = (inputEl && inputEl.value) || hojeISO();
   if(c.agenda && !confirm('Já existe uma agenda gerada para este cronograma. Gerar de novo vai substituí-la (o progresso marcado será perdido). Continuar?')) return;
 
-  const remaining = pendentes.map(m=>({id:m.id, ma:m.ma, left:m.aulasTotal-m.aulasConcluidas}));
+  // Sequência mesclada por peso (Smooth Weighted Round-Robin, o mesmo método
+  // usado em balanceadores de carga): a cada escolha, toda matéria pendente
+  // acumula seu peso (aulas restantes) e a de maior saldo acumulado é
+  // escolhida, que então perde o total de pesos ativos. Isso intercala as
+  // matérias ao longo de TODA a agenda — em vez de esgotar as duas maiores
+  // primeiro e só depois começar as outras — mantendo as que têm mais aulas
+  // aparecendo com mais frequência, de forma bem espaçada.
+  const items = pendentes.map(m => ({
+    id: m.id, ma: m.ma,
+    left: m.aulasTotal - m.aulasConcluidas,
+    peso: m.aulasTotal - m.aulasConcluidas,
+    atual: 0
+  }));
+
+  const sequencia = [];
+  while(items.some(it=>it.left>0)){
+    const ativos = items.filter(it=>it.left>0);
+    const totalPeso = ativos.reduce((s,it)=>s+it.peso,0);
+    ativos.forEach(it=>{ it.atual += it.peso; });
+    let escolhido = ativos[0];
+    ativos.forEach(it=>{ if(it.atual > escolhido.atual) escolhido = it; });
+    escolhido.atual -= totalPeso;
+    escolhido.left -= 1;
+    sequencia.push({id:escolhido.id, ma:escolhido.ma});
+  }
+
   const dias=[];
-  let idx=0;
-  while(remaining.some(r=>r.left>0)){
-    const avail = remaining.filter(r=>r.left>0).sort((a,b)=>b.left-a.left);
-    let picks;
-    if(avail.length>=2){
-      picks = [avail[0], avail[1]];
-    } else {
-      picks = avail[0].left>=2 ? [avail[0], avail[0]] : [avail[0]];
-    }
-    const date = addDiasISO(dataInicio, idx);
-    dias.push({date, materias: picks.map(p=>({id:p.id, ma:p.ma}))});
-    picks.forEach(p=>{ const orig = remaining.find(r=>r.id===p.id); orig.left -= 1; });
-    idx += 1;
+  for(let i=0;i<sequencia.length;i+=2){
+    const date = addDiasISO(dataInicio, dias.length);
+    dias.push({date, materias: sequencia.slice(i, i+2)});
   }
 
   c.agenda = {dataInicio, dias};
@@ -304,12 +372,172 @@ function gerarAgenda(){
   ntf('🗓️ Agenda mesclada gerada!');
 }
 
-function toggleAgendaItem(dateIso, materiaId){
+// ===== ROTINA SEMANAL =====
+// Grade dia x horário (estilo planilha), com células de texto livre editadas
+// à mão. As linhas de Revisões e Questões, ao final, puxam dados reais do
+// app: revisões pendentes dos próximos 7 dias — e Questões usa exatamente a
+// mesma frequência (mesmos dias) que Revisões, como lembrete pra praticar.
+function chaveCelulaRotina(linhaId, dataLabel){ return linhaId+'|'+dataLabel; }
+
+function salvarRotinaCelula(linhaId, dataLabel, valor){
   const c = currentC();
-  const key = dateIso+'|'+materiaId;
-  if(c.agendaConcluidos[key]) delete c.agendaConcluidos[key];
-  else c.agendaConcluidos[key] = true;
+  const chave = chaveCelulaRotina(linhaId, dataLabel);
+  if(valor) c.rotina.celulas[chave] = valor;
+  else delete c.rotina.celulas[chave];
+  sv();
+}
+
+function salvarHorarioLinha(linhaId, valor){
+  const c = currentC();
+  const linha = c.rotina.linhas.find(l=>l.id===linhaId);
+  if(!linha) return;
+  linha.horario = valor;
+  sv();
+}
+
+function salvarHorasEstudoRotina(dataLabel, valor){
+  const c = currentC();
+  if(valor) c.rotina.horasEstudo[dataLabel] = valor;
+  else delete c.rotina.horasEstudo[dataLabel];
+  sv();
+}
+
+function addLinhaRotina(){
+  const c = currentC();
+  c.rotina.linhas.push({ id:'rl'+Math.random().toString(36).substr(2,6), horario:'' });
   sv();rend();
+}
+
+function removerLinhaRotina(linhaId){
+  const c = currentC();
+  c.rotina.linhas = c.rotina.linhas.filter(l=>l.id!==linhaId);
+  Object.keys(c.rotina.celulas).forEach(k=>{ if(k.startsWith(linhaId+'|')) delete c.rotina.celulas[k]; });
+  sv();rend();
+}
+
+// Semana exibida na Rotina (0 = semana atual, +1 = próxima, -1 = anterior).
+// Não é salvo — é só navegação, volta pra semana atual ao recarregar.
+let rotinaSemanaOffset = 0;
+
+function segundaDaSemana(offset){
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const diaSemana = hoje.getDay(); // 0=domingo..6=sábado
+  const diffSegunda = diaSemana===0 ? -6 : 1-diaSemana; // volta até a segunda desta semana
+  return addDias(hoje, diffSegunda + offset*7);
+}
+
+function mudarSemanaRotina(delta){
+  rotinaSemanaOffset += delta;
+  rend();
+}
+
+function irParaSemanaAtual(){
+  rotinaSemanaOffset = 0;
+  rend();
+}
+
+// Datas reais (Segunda a Domingo) da semana selecionada, com as revisões
+// pendentes de cada dia agrupadas.
+function diasDaSemana(segunda){
+  const c = currentC();
+  const out = [];
+  for(let i=0;i<7;i++){
+    const d = addDias(segunda, i);
+    const label = fmtDMY(d);
+    out.push({
+      data: d,
+      label,
+      nomeDia: DIAS_SEMANA[i],
+      revs: c.revs.filter(r=>r.s==='p' && r.dr===label)
+    });
+  }
+  return out;
+}
+
+function renderRotina(c){
+  const rotina = c.rotina;
+  const segunda = segundaDaSemana(rotinaSemanaOffset);
+  const semana = diasDaSemana(segunda);
+  const hojeLabel = fmtDMY(new Date());
+  const rangeLabel = `${fmtDMY(semana[0].data)} — ${fmtDMY(semana[6].data)}`;
+  return `
+<h2 class="text-2xl font-bold mb-2">📆 Rotina Semanal — ${c.nome}</h2>
+<p class="text-gray-500 text-sm mb-4">Sua grade de horários da semana. Clique em qualquer célula pra editar — cada semana tem seu próprio conteúdo (o que você preencher aqui não se repete nas outras semanas). As linhas de Revisões e Questões, mais abaixo, mostram os dados reais do app pra essa semana.</p>
+
+<div class="flex items-center gap-3 mb-4">
+  <button onclick="mudarSemanaRotina(-1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Semana anterior">←</button>
+  <div class="font-bold text-gray-700 text-sm min-w-[180px] text-center">${rangeLabel}</div>
+  <button onclick="mudarSemanaRotina(1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Próxima semana">→</button>
+  ${rotinaSemanaOffset!==0?`<button onclick="irParaSemanaAtual()" class="text-indigo-600 hover:underline text-xs font-bold">Voltar pra hoje</button>`:''}
+</div>
+
+<div class="overflow-x-auto mb-4">
+<table class="w-full border-collapse text-sm">
+<thead>
+<tr>
+<th class="bg-gray-200 text-gray-700 font-bold p-2 border border-gray-300 sticky left-0">Horário</th>
+${semana.map(d=>`<th class="${d.label===hojeLabel?'bg-indigo-100 text-indigo-800':'bg-gray-200 text-gray-700'} font-bold p-2 border border-gray-300 min-w-[120px]">${d.nomeDia}<br><span class="font-normal text-xs">${d.label}</span></th>`).join('')}
+<th class="bg-gray-200 border border-gray-300 w-10"></th>
+</tr>
+</thead>
+<tbody>
+${rotina.linhas.map(linha=>`
+<tr>
+<td class="bg-gray-100 border border-gray-300 p-1 sticky left-0">
+  <input value="${linha.horario}" onchange="salvarHorarioLinha('${linha.id}',this.value)" class="w-full bg-transparent font-bold text-gray-700 text-xs p-1 focus:outline-none focus:bg-white rounded" placeholder="Horário">
+</td>
+${semana.map(d=>`
+<td class="border border-gray-300 p-1 bg-lime-50">
+  <input value="${rotina.celulas[chaveCelulaRotina(linha.id,d.label)] || ''}" onchange="salvarRotinaCelula('${linha.id}','${d.label}',this.value)" class="w-full bg-transparent text-xs p-1 focus:outline-none focus:bg-white rounded text-center" placeholder="—">
+</td>`).join('')}
+<td class="border border-gray-300 text-center">
+  <button onclick="removerLinhaRotina('${linha.id}')" class="text-red-400 hover:text-red-600 text-xs" title="Remover horário">✕</button>
+</td>
+</tr>`).join('')}
+<tr>
+<td class="bg-gray-100 border border-gray-300 p-1 font-bold text-xs text-gray-700 sticky left-0">Horas de estudo</td>
+${semana.map(d=>`
+<td class="border border-gray-300 p-1 bg-lime-100">
+  <input type="number" step="0.5" min="0" value="${rotina.horasEstudo[d.label] || ''}" onchange="salvarHorasEstudoRotina('${d.label}',this.value)" class="w-full bg-transparent text-xs p-1 text-center focus:outline-none focus:bg-white rounded" placeholder="0">
+</td>`).join('')}
+<td class="border border-gray-300"></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p class="text-xs text-gray-400 mb-8">Os campos de horas de estudo devem ser preenchidos manualmente.</p>
+
+<button onclick="addLinhaRotina()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm mb-8">+ Adicionar horário</button>
+
+<h3 class="text-lg font-bold mb-1">🔄 Revisões e ✍️ Questões — ${rangeLabel}</h3>
+<p class="text-gray-500 text-sm mb-4">Puxado direto das revisões pendentes do app pra essa semana. Questões aparece exatamente nos mesmos dias que Revisões — é um lembrete pra praticar questões da mesma matéria revisada.</p>
+<div class="overflow-x-auto">
+<table class="w-full border-collapse text-sm">
+<thead>
+<tr>
+<th class="bg-gray-200 text-gray-700 font-bold p-2 border border-gray-300 sticky left-0">&nbsp;</th>
+${semana.map(d=>`<th class="${d.label===hojeLabel?'bg-indigo-100 text-indigo-800':'bg-gray-200 text-gray-700'} font-bold p-2 border border-gray-300 min-w-[120px]">${d.nomeDia}<br><span class="font-normal text-xs">${d.label}</span></th>`).join('')}
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="bg-orange-50 border border-gray-300 p-2 font-bold text-xs text-orange-700 sticky left-0">🔄 Revisões</td>
+${semana.map(d=>`
+<td class="border border-gray-300 p-2 align-top ${d.revs.length>0?'bg-orange-50':''}">
+  ${d.revs.length===0?'<span class="text-gray-300 text-xs">—</span>':d.revs.map(r=>`<div class="text-xs font-bold text-orange-800 mb-1">${r.ma}</div>`).join('')}
+</td>`).join('')}
+</tr>
+<tr>
+<td class="bg-pink-50 border border-gray-300 p-2 font-bold text-xs text-pink-700 sticky left-0">✍️ Questões</td>
+${semana.map(d=>`
+<td class="border border-gray-300 p-2 align-top text-center ${d.revs.length>0?'bg-pink-50':''}">
+  ${d.revs.length===0?'<span class="text-gray-300 text-xs">—</span>':'<span class="text-xs font-bold text-pink-700">📝 Praticar</span>'}
+</td>`).join('')}
+</tr>
+</tbody>
+</table>
+</div>
+`;
 }
 
 // Helpers de data
@@ -347,7 +575,7 @@ function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas=''){
 }
 
 // Abre modal para registrar estudo
-function registrarAulas(id){
+function registrarAulas(id, agendaKey){
   const c = currentC();
   const item = c.cron.find(x=>x.id===id);
   if(!item) return;
@@ -407,6 +635,7 @@ function registrarAulas(id){
     const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:notas};
     c.dias.push(ds);
     gerarRevisoes(ds.id, item.ma, de, ate, real, data1, notas);
+    if(agendaKey) c.agendaConcluidos[agendaKey] = true;
     document.getElementById('modal-root').innerHTML = '';
     sv();rend();
     ntf(`🎉 +${real} aulas em ${item.ma}!`);
@@ -683,6 +912,7 @@ function rend(){
 <div class="flex border-b overflow-x-auto">
 <button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
 <button onclick="e.aba='agenda';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='agenda'?'tab-active':'text-gray-600 hover:text-gray-800'}">🗓️ Agenda</button>
+<button onclick="e.aba='rotina';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='rotina'?'tab-active':'text-gray-600 hover:text-gray-800'}">📆 Rotina Semanal</button>
 <button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
 <button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
 <button onclick="e.aba='foco';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='foco'?'tab-active':'text-gray-600 hover:text-gray-800'}">🍅 Foco (PD)</button>
@@ -758,7 +988,7 @@ ${concluidas.map(item=>`
 
 ${e.aba==='agenda'?`
 <h2 class="text-2xl font-bold mb-2">🗓️ Agenda mesclada — ${c.nome}</h2>
-<p class="text-gray-500 text-sm mb-6">Distribui 2 matérias por dia entre as aulas ainda não concluídas deste cronograma, priorizando quem tem mais aulas restantes.</p>
+<p class="text-gray-500 text-sm mb-6">Distribui 2 matérias por dia, intercalando entre todas as aulas ainda não concluídas deste cronograma — as que têm mais aulas restantes aparecem com mais frequência, mas bem espaçadas ao longo da agenda.</p>
 
 <div class="bg-gray-50 rounded-xl p-4 mb-8">
   <div class="flex gap-3 flex-wrap items-end">
@@ -783,7 +1013,7 @@ ${c.agenda.dias.map(dia=>{
   ${dia.materias.map(m=>{
     const key = dia.date+'|'+m.id;
     const done = !!c.agendaConcluidos[key];
-    return `<button onclick="toggleAgendaItem('${dia.date}','${m.id}')" class="text-sm px-3 py-2 rounded-lg font-bold border-2 ${done?'bg-green-100 border-green-300 text-green-700 line-through':'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'}">${done?'✓ ':''}${m.ma}</button>`;
+    return `<button onclick="registrarAulas('${m.id}','${key}')" class="text-sm px-3 py-2 rounded-lg font-bold border-2 ${done?'bg-green-100 border-green-300 text-green-700 line-through':'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'}">${done?'✓ ':''}${m.ma}</button>`;
   }).join('')}
   </div>
 </div>`;
@@ -791,6 +1021,8 @@ ${c.agenda.dias.map(dia=>{
 </div>
 `}
 `:''}
+
+${e.aba==='rotina'?renderRotina(c):''}
 
 ${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data — ${c.nome}</h2>${c.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${c.revs.filter(x=>x.s==='p').length})</h3>${c.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${c.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${c.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${c.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${c.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div></div>`:''}`}</div>`:''}
 
@@ -873,7 +1105,13 @@ ${svgChartPomodoros(14)}
   window.addMateria = addMateria;
   window.delMateria = delMateria;
   window.gerarAgenda = gerarAgenda;
-  window.toggleAgendaItem = toggleAgendaItem;
+  window.salvarRotinaCelula = salvarRotinaCelula;
+  window.salvarHorarioLinha = salvarHorarioLinha;
+  window.salvarHorasEstudoRotina = salvarHorasEstudoRotina;
+  window.addLinhaRotina = addLinhaRotina;
+  window.removerLinhaRotina = removerLinhaRotina;
+  window.mudarSemanaRotina = mudarSemanaRotina;
+  window.irParaSemanaAtual = irParaSemanaAtual;
   window.registrarAulas = registrarAulas;
   window.mkR = mkR;
   window.editData = editData;
