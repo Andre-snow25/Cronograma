@@ -325,6 +325,28 @@ function hojeISO(){
   const d=new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
+function toISO(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function segundaDeData(d){
+  const dia = d.getDay(); // 0=domingo..6=sábado
+  const diff = dia===0 ? -6 : 1-dia;
+  return addDias(d, diff);
+}
+
+// Semana exibida na Agenda (0 = semana atual). Não é salvo — só navegação.
+let agendaSemanaOffset = 0;
+function mudarSemanaAgenda(delta){ agendaSemanaOffset += delta; rend(); }
+function irParaSemanaAtualAgenda(){ agendaSemanaOffset = 0; rend(); }
+function offsetDaSemanaDeData(iso){
+  const segundaAlvo = segundaDeData(new Date(iso+'T00:00:00'));
+  const segundaHoje = segundaDeData(new Date());
+  return Math.round((segundaAlvo - segundaHoje) / (7*86400000));
+}
+function irParaSemanaDaData(iso){
+  agendaSemanaOffset = offsetDaSemanaDeData(iso);
+  rend();
+}
 
 function gerarAgenda(){
   const c = currentC();
@@ -368,6 +390,7 @@ function gerarAgenda(){
 
   c.agenda = {dataInicio, dias};
   c.agendaConcluidos = {};
+  agendaSemanaOffset = offsetDaSemanaDeData(dataInicio);
   sv();rend();
   ntf('🗓️ Agenda mesclada gerada!');
 }
@@ -1000,9 +1023,23 @@ ${e.aba==='agenda'?`
   </div>
 </div>
 
-${!c.agenda ? `<p class="text-gray-400 text-center py-12 bg-gray-50 rounded-lg">Nenhuma agenda gerada ainda. Cadastre matérias no Plano e clique em "Gerar agenda mesclada".</p>` : `
-<div class="space-y-3 max-h-[560px] overflow-y-auto pr-1">
-${c.agenda.dias.map(dia=>{
+${!c.agenda ? `<p class="text-gray-400 text-center py-12 bg-gray-50 rounded-lg">Nenhuma agenda gerada ainda. Cadastre matérias no Plano e clique em "Gerar agenda mesclada".</p>` : (()=>{
+  const segunda = segundaDeData(addDias(new Date(), agendaSemanaOffset*7));
+  const segundaISO = toISO(segunda);
+  const domingoISO = addDiasISO(segundaISO, 6);
+  const rangeLabel = `${fmtDMY(segunda)} — ${fmtDMY(addDias(segunda,6))}`;
+  const diasSemana = c.agenda.dias.filter(dia => dia.date >= segundaISO && dia.date <= domingoISO);
+  return `
+<div class="flex items-center gap-3 mb-4 flex-wrap">
+  <button onclick="mudarSemanaAgenda(-1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Semana anterior">←</button>
+  <div class="font-bold text-gray-700 text-sm min-w-[180px] text-center">${rangeLabel}</div>
+  <button onclick="mudarSemanaAgenda(1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Próxima semana">→</button>
+  ${agendaSemanaOffset!==0?`<button onclick="irParaSemanaAtualAgenda()" class="text-indigo-600 hover:underline text-xs font-bold">Voltar pra hoje</button>`:''}
+  <button onclick="irParaSemanaDaData('${c.agenda.dataInicio}')" class="text-indigo-600 hover:underline text-xs font-bold">Ir para o início da agenda</button>
+</div>
+
+<div class="space-y-3">
+${diasSemana.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhum item da agenda nessa semana.</p>':diasSemana.map(dia=>{
   const isHoje = dia.date === hojeISO();
   return `<div class="border-l-4 ${isHoje?'border-indigo-500 bg-indigo-50':'border-gray-200 bg-white'} rounded-xl p-4">
   <div class="flex items-center gap-2 mb-2">
@@ -1019,7 +1056,8 @@ ${c.agenda.dias.map(dia=>{
 </div>`;
 }).join('')}
 </div>
-`}
+`;
+})()}
 `:''}
 
 ${e.aba==='rotina'?renderRotina(c):''}
@@ -1105,6 +1143,9 @@ ${svgChartPomodoros(14)}
   window.addMateria = addMateria;
   window.delMateria = delMateria;
   window.gerarAgenda = gerarAgenda;
+  window.mudarSemanaAgenda = mudarSemanaAgenda;
+  window.irParaSemanaAtualAgenda = irParaSemanaAtualAgenda;
+  window.irParaSemanaDaData = irParaSemanaDaData;
   window.salvarRotinaCelula = salvarRotinaCelula;
   window.salvarHorarioLinha = salvarHorarioLinha;
   window.salvarHorasEstudoRotina = salvarHorasEstudoRotina;
