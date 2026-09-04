@@ -698,6 +698,11 @@ function registrarQuestoes(ma){
         <input id="q-qtd" type="number" min="1" value="10"
           class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold mb-4 focus:border-purple-500 focus:outline-none">
 
+        <label class="block text-sm font-semibold text-gray-700 mb-1">✅ Quantas você acertou?</label>
+        <input id="q-acertos" type="number" min="0" value="0"
+          class="w-24 border-2 border-gray-300 rounded-lg p-2 text-center text-xl font-bold mb-2 focus:border-green-500 focus:outline-none">
+        <p class="text-sm text-gray-500 mb-4">❌ Erros: <span id="q-erros-preview" class="font-bold text-red-600">10</span></p>
+
         <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data</label>
         <input id="q-data" type="date" value="${hojeISO}"
           class="w-full border-2 border-gray-300 rounded-lg p-2 mb-5 focus:border-purple-500 focus:outline-none">
@@ -709,21 +714,32 @@ function registrarQuestoes(ma){
       </div>
     </div>`;
 
+  const atualizarErrosPreview = () => {
+    const qtd = parseInt(document.getElementById('q-qtd').value)||0;
+    const acertos = parseInt(document.getElementById('q-acertos').value)||0;
+    const erros = Math.max(0, qtd-acertos);
+    document.getElementById('q-erros-preview').textContent = erros;
+  };
+  document.getElementById('q-qtd').oninput = atualizarErrosPreview;
+  document.getElementById('q-acertos').oninput = atualizarErrosPreview;
+
   document.getElementById('q-cancelar').onclick = () => {
     document.getElementById('modal-root').innerHTML = '';
   };
 
   document.getElementById('q-confirmar').onclick = () => {
     const qtd = parseInt(document.getElementById('q-qtd').value)||0;
+    const acertos = parseInt(document.getElementById('q-acertos').value)||0;
     const dataStr = document.getElementById('q-data').value;
     if(!qtd||qtd<=0){ntf('❌ Informe a quantidade de questões','er');return;}
+    if(acertos<0||acertos>qtd){ntf('❌ Acertos não pode ser maior que o total de questões','er');return;}
     if(!dataStr){ntf('❌ Informe a data','er');return;}
     const [y,m,d] = dataStr.split('-');
     const dataFmt = `${d}/${m}/${y}`;
-    currentC().questoes.push({id:Date.now(),ma,data:dataFmt,qtd});
+    currentC().questoes.push({id:Date.now(),ma,data:dataFmt,qtd,acertos});
     document.getElementById('modal-root').innerHTML = '';
     sv();rend();
-    ntf(`🎉 +${qtd} questões em ${ma}!`);
+    ntf(`🎉 +${qtd} questões em ${ma} (${acertos} acertos, ${qtd-acertos} erros)!`);
   };
 }
 
@@ -765,6 +781,23 @@ function questoesTotal(){
 }
 function mediaDiariaSemana(){
   return (questoesSemana()/7).toFixed(1);
+}
+
+// acertos/erros: registros antigos podem não ter "acertos" salvo (undefined) —
+// esses são ignorados no cálculo de aproveitamento em vez de contar como erro.
+function questoesDesempenho(lista){
+  const comDados = lista.filter(q=>typeof q.acertos==='number');
+  const qtd = comDados.reduce((s,q)=>s+q.qtd,0);
+  const acertos = comDados.reduce((s,q)=>s+q.acertos,0);
+  const erros = qtd-acertos;
+  const pct = qtd>0 ? Math.round((acertos/qtd)*100) : null;
+  return {qtd,acertos,erros,pct};
+}
+function desempenhoBadge(pct){
+  if(pct===null) return {cor:'text-gray-500',rotulo:'Sem dados de acerto ainda'};
+  if(pct>=70) return {cor:'text-green-600',rotulo:'🟢 Indo bem!'};
+  if(pct>=50) return {cor:'text-yellow-600',rotulo:'🟡 Atenção, pode melhorar'};
+  return {cor:'text-red-600',rotulo:'🔴 Precisa reforçar essa matéria'};
 }
 
 // ===== PDs / POMODORO (por cronograma) =====
@@ -1186,11 +1219,12 @@ ${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Da
 ${e.aba==='questoes'?`
 <h2 class="text-2xl font-bold mb-6">✍️ Questões — ${c.nome}</h2>
 
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
 <div class="bg-gradient-to-br from-pink-100 to-pink-200 p-4 rounded-xl"><p class="text-sm font-bold text-pink-900 mb-1">📅 Hoje</p><p class="text-3xl font-bold text-pink-700">${questoesHoje()}</p></div>
 <div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📆 7 dias</p><p class="text-3xl font-bold text-purple-700">${questoesSemana()}</p><p class="text-xs text-purple-600">média ${mediaDiariaSemana()}/dia</p></div>
 <div class="bg-gradient-to-br from-blue-100 to-blue-200 p-4 rounded-xl"><p class="text-sm font-bold text-blue-900 mb-1">🗓️ 30 dias</p><p class="text-3xl font-bold text-blue-700">${questoesMes()}</p></div>
 <div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">🎯 Total</p><p class="text-3xl font-bold text-green-700">${questoesTotal()}</p></div>
+${(()=>{const d=questoesDesempenho(c.questoes);return `<div class="bg-gradient-to-br from-teal-100 to-teal-200 p-4 rounded-xl"><p class="text-sm font-bold text-teal-900 mb-1">📈 Aproveitamento</p><p class="text-3xl font-bold text-teal-700">${d.pct===null?'—':d.pct+'%'}</p>${d.pct!==null?`<p class="text-xs text-teal-600">✅ ${d.acertos} · ❌ ${d.erros}</p>`:''}</div>`;})()}
 </div>
 
 <div class="bg-gray-50 rounded-xl p-4 mb-8">
@@ -1201,11 +1235,16 @@ ${svgChartDias(14)}
 <h3 class="text-xl font-bold text-gray-800 mb-4">📖 Por matéria</h3>
 ${c.cron.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg mb-8">Cadastre matérias na aba Plano para registrar questões por matéria.</p>':`<div class="grid md:grid-cols-2 gap-3 mb-8">
 ${c.cron.map(item=>{
-  const qtd = c.questoes.filter(q=>q.ma===item.ma).reduce((s,q)=>s+q.qtd,0);
+  const lista = c.questoes.filter(q=>q.ma===item.ma);
+  const qtd = lista.reduce((s,q)=>s+q.qtd,0);
+  const d = questoesDesempenho(lista);
+  const badge = desempenhoBadge(d.pct);
   return `<div class="border-2 border-purple-200 bg-purple-50 rounded-xl p-4 flex justify-between items-center gap-3">
   <div class="min-w-0">
     <h4 class="font-bold text-gray-800 break-words">${item.ma}</h4>
     <span class="text-sm text-purple-700 font-bold">${qtd} questões resolvidas</span>
+    ${d.pct!==null?`<p class="text-xs text-gray-600">✅ ${d.acertos} acertos · ❌ ${d.erros} erros · ${d.pct}%</p>`:''}
+    <p class="text-xs font-bold ${badge.cor}">${badge.rotulo}</p>
   </div>
   <button onclick="registrarQuestoes('${item.ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Questões</button>
 </div>`;
@@ -1220,7 +1259,7 @@ ${c.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
 <div class="border-l-4 border-purple-400 bg-white rounded-lg p-3 flex justify-between items-center gap-3">
   <div class="min-w-0">
     <p class="text-sm font-bold text-gray-700">${q.data} — ${q.ma}</p>
-    <p class="text-xs text-gray-500">${q.qtd} questões</p>
+    <p class="text-xs text-gray-500">${q.qtd} questões${typeof q.acertos==='number'?` · ✅ ${q.acertos} · ❌ ${q.qtd-q.acertos}`:' · sem dados de acerto'}</p>
   </div>
   <button onclick="delQuestao(${q.id})" class="text-red-500 hover:text-red-700 text-sm font-bold">🗑️</button>
 </div>`).join('')}
