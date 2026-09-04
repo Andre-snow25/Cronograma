@@ -768,13 +768,20 @@ function mediaDiariaSemana(){
 }
 
 // ===== PDs / POMODORO (por cronograma) =====
+// O cronometro se baseia no horario real (pomoFimEm), nao em contagem de ticks:
+// isso evita que o tempo fique errado quando a aba fica em segundo plano
+// (navegadores reduzem a frequencia do setInterval) e permite retomar
+// corretamente apos um reload/troca de aba, guardando o estado no localStorage.
 const POMO_DURACAO = 25*60;
 const POMO_PAUSA_DURACAO = 5*60;
+const POMO_STORAGE_KEY = 'pomoState';
 let pomoSegundos = POMO_DURACAO;
 let pomoRodando = false;
 let pomoIntervalId = null;
 let pomoEmPausa = false;
 let pomoAudioCtx = null;
+let pomoFimEm = null;
+let pomoCronoId = null;
 
 function pomoFmt(s){
   const m=Math.floor(s/60).toString().padStart(2,'0');
@@ -803,49 +810,118 @@ function pomoAlarme(){
     tocar(0,880); tocar(0.45,880); tocar(0.9,1175);
   }catch(err){}
 }
+function pomoSalvarEstado(){
+  try{
+    if(pomoRodando && pomoFimEm){
+      localStorage.setItem(POMO_STORAGE_KEY, JSON.stringify({emPausa:pomoEmPausa, fimEm:pomoFimEm, cronoId:pomoCronoId}));
+    } else {
+      localStorage.removeItem(POMO_STORAGE_KEY);
+    }
+  }catch(err){}
+}
+function pomoCreditarPD(){
+  const cron = e.cronogramas.find(c=>c.id===pomoCronoId) || currentC();
+  cron.pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR')});
+  sv();
+}
+function pomoRestaurarEstado(){
+  try{
+    const raw = localStorage.getItem(POMO_STORAGE_KEY);
+    if(!raw) return;
+    const st = JSON.parse(raw);
+    if(!st || !st.fimEm) return;
+    pomoEmPausa = !!st.emPausa;
+    pomoCronoId = st.cronoId;
+    let fimEm = st.fimEm;
+    let restante = fimEm - Date.now();
+    let seguirRodando = true;
+    // processa fases que ja terminaram enquanto a aba estava em segundo plano/fechada
+    while(restante<=0 && seguirRodando){
+      if(!pomoEmPausa){
+        pomoCreditarPD();
+        pomoEmPausa = true;
+        fimEm += POMO_PAUSA_DURACAO*1000;
+        restante = fimEm - Date.now();
+      } else {
+        seguirRodando = false;
+      }
+    }
+    if(seguirRodando){
+      pomoRodando = true;
+      pomoFimEm = fimEm;
+      pomoSegundos = Math.max(0, Math.round(restante/1000));
+      pomoIntervalId = setInterval(pomoTick,1000);
+      ntf('🍅 Contagem do PD retomada.');
+    } else {
+      pomoEmPausa = false;
+      pomoRodando = false;
+      pomoFimEm = null;
+      pomoSegundos = POMO_DURACAO;
+      localStorage.removeItem(POMO_STORAGE_KEY);
+      ntf('☕ Pausa concluída enquanto você estava fora. Pronto para o próximo PD.');
+    }
+    rend();
+  }catch(err){}
+}
 function pomoToggle(){
   if(pomoRodando){
     pomoRodando=false; clearInterval(pomoIntervalId);
+    pomoFimEm = null;
+    pomoSalvarEstado();
   } else {
     pomoAudioUnlock();
+    if(!pomoEmPausa) pomoCronoId = currentC().id;
     pomoRodando=true;
+    pomoFimEm = Date.now() + pomoSegundos*1000;
     pomoIntervalId=setInterval(pomoTick,1000);
+    pomoSalvarEstado();
   }
   rend();
 }
 function pomoTick(){
-  pomoSegundos--;
+  if(!pomoFimEm) return;
+  pomoSegundos = Math.max(0, Math.round((pomoFimEm - Date.now())/1000));
   const disp = document.getElementById('pomo-display');
   if(disp) disp.textContent = pomoFmt(pomoSegundos);
   if(pomoSegundos<=0){
     clearInterval(pomoIntervalId);
     pomoAlarme();
     if(!pomoEmPausa){
-      currentC().pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR')});
-      sv();
+      pomoCreditarPD();
       ntf('🍅 PD concluído! Pausa de 5 minutos iniciada.');
       pomoEmPausa = true;
+      pomoFimEm = Date.now() + POMO_PAUSA_DURACAO*1000;
       pomoSegundos = POMO_PAUSA_DURACAO;
       pomoIntervalId = setInterval(pomoTick,1000);
+      pomoSalvarEstado();
     } else {
       ntf('☕ Pausa concluída! Pronto para o próximo PD.');
       pomoEmPausa = false;
       pomoRodando = false;
+      pomoFimEm = null;
       pomoSegundos = POMO_DURACAO;
+      pomoSalvarEstado();
     }
     rend();
   }
 }
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && pomoRodando) pomoTick();
+});
 function pomoPularPausa(){
   pomoRodando=false; clearInterval(pomoIntervalId);
   pomoEmPausa=false;
+  pomoFimEm=null;
   pomoSegundos = POMO_DURACAO;
+  pomoSalvarEstado();
   rend();
 }
 function pomoReset(){
   pomoRodando=false; clearInterval(pomoIntervalId);
   pomoEmPausa=false;
+  pomoFimEm=null;
   pomoSegundos = POMO_DURACAO;
+  pomoSalvarEstado();
   rend();
 }
 
@@ -1214,7 +1290,7 @@ ${svgChartPomodoros(14)}
   window.rend = rend;
 }
 
-loadFromCloud();
+loadFromCloud().then(pomoRestaurarEstado);
 </script>
 </body>
 </html>
