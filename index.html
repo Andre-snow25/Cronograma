@@ -794,10 +794,10 @@ function questoesDesempenho(lista){
   return {qtd,acertos,erros,pct};
 }
 function desempenhoBadge(pct){
-  if(pct===null) return {cor:'text-gray-500',rotulo:'Sem dados de acerto ainda'};
-  if(pct>=70) return {cor:'text-green-600',rotulo:'🟢 Indo bem!'};
-  if(pct>=50) return {cor:'text-yellow-600',rotulo:'🟡 Atenção, pode melhorar'};
-  return {cor:'text-red-600',rotulo:'🔴 Precisa reforçar essa matéria'};
+  if(pct===null) return {hex:'#c3c2b7',rotulo:'Sem dados de acerto ainda'};
+  if(pct>=70) return {hex:'#0ca30c',rotulo:'🟢 Indo bem!'};
+  if(pct>=50) return {hex:'#fab219',rotulo:'🟡 Atenção, pode melhorar'};
+  return {hex:'#d03b3b',rotulo:'🔴 Precisa reforçar essa matéria'};
 }
 
 // ===== PDs / POMODORO (por cronograma) =====
@@ -1232,6 +1232,36 @@ ${(()=>{const d=questoesDesempenho(c.questoes);return `<div class="bg-gradient-t
 ${svgChartDias(14)}
 </div>
 
+${(()=>{
+  const ranking = c.cron.map(item=>{
+    const lista = c.questoes.filter(q=>q.ma===item.ma);
+    return {ma:item.ma, ...questoesDesempenho(lista)};
+  }).filter(x=>x.pct!==null).sort((a,b)=>a.pct-b.pct);
+  if(ranking.length===0) return '';
+  return `<div class="bg-gray-50 rounded-xl p-4 mb-8">
+<h3 class="font-bold text-gray-700 mb-1">🏆 Aproveitamento por matéria</h3>
+<p class="text-xs text-gray-500 mb-4">Ordenado da matéria que mais precisa de atenção pra que está indo melhor.</p>
+<div class="space-y-4">
+${ranking.map(x=>{
+  const badge = desempenhoBadge(x.pct);
+  return `<div>
+  <div class="flex justify-between items-baseline mb-1 gap-2">
+    <span class="text-sm font-bold text-gray-800 break-words">${x.ma}</span>
+    <span class="text-sm font-bold text-gray-800 flex-shrink-0">${x.pct}%</span>
+  </div>
+  <div class="h-3 rounded-full bg-gray-200 overflow-hidden">
+    <div class="h-full rounded-full" style="width:${x.pct}%;background:${badge.hex}"></div>
+  </div>
+  <div class="flex justify-between items-center mt-1 gap-2">
+    <span class="text-xs text-gray-600">${badge.rotulo}</span>
+    <span class="text-xs text-gray-500 flex-shrink-0">✅ ${x.acertos} · ❌ ${x.erros} · ${x.qtd} questões</span>
+  </div>
+</div>`;
+}).join('')}
+</div>
+</div>`;
+})()}
+
 <h3 class="text-xl font-bold text-gray-800 mb-4">📖 Por matéria</h3>
 ${c.cron.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg mb-8">Cadastre matérias na aba Plano para registrar questões por matéria.</p>':`<div class="grid md:grid-cols-2 gap-3 mb-8">
 ${c.cron.map(item=>{
@@ -1243,8 +1273,7 @@ ${c.cron.map(item=>{
   <div class="min-w-0">
     <h4 class="font-bold text-gray-800 break-words">${item.ma}</h4>
     <span class="text-sm text-purple-700 font-bold">${qtd} questões resolvidas</span>
-    ${d.pct!==null?`<p class="text-xs text-gray-600">✅ ${d.acertos} acertos · ❌ ${d.erros} erros · ${d.pct}%</p>`:''}
-    <p class="text-xs font-bold ${badge.cor}">${badge.rotulo}</p>
+    <p class="text-xs text-gray-600">${badge.rotulo}</p>
   </div>
   <button onclick="registrarQuestoes('${item.ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Questões</button>
 </div>`;
