@@ -347,6 +347,19 @@ function irParaSemanaDaData(iso){
   agendaSemanaOffset = offsetDaSemanaDeData(iso);
   rend();
 }
+function dmyParaISO(dmy){
+  const [d,m,y] = dmy.split('/');
+  return `${y}-${m}-${d}`;
+}
+
+// Semana exibida em Revisões (0 = semana atual). Não é salvo — só navegação.
+let revsSemanaOffset = 0;
+function mudarSemanaRevs(delta){ revsSemanaOffset += delta; rend(); }
+function irParaSemanaAtualRevs(){ revsSemanaOffset = 0; rend(); }
+function irParaSemanaRevsDaData(dmy){
+  revsSemanaOffset = offsetDaSemanaDeData(dmyParaISO(dmy));
+  rend();
+}
 
 function gerarAgenda(){
   const c = currentC();
@@ -1214,7 +1227,65 @@ ${diasSemana.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rou
 
 ${e.aba==='rotina'?renderRotina(c):''}
 
-${e.aba==='revs'?`<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data — ${c.nome}</h2>${c.revs.length===0?'<div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div>':`<div class="mb-8"><h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes (${c.revs.filter(x=>x.s==='p').length})</h3>${c.revs.filter(x=>x.s==='p').length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente!</p>':`<div class="space-y-3">${c.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all"><div class="flex flex-col md:flex-row justify-between gap-4"><div class="flex-1 min-w-0"><div class="flex items-center gap-2 mb-2"><span class="text-2xl">📅</span><strong class="text-xl">${r.dr}</strong><button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button></div><h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4><div class="flex gap-2 flex-wrap text-xs mb-3"><span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span><span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span></div>${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}</div><button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button></div></div>`).join('')}</div>`}</div>${c.revs.filter(x=>x.s==='c').length>0?`<div><h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas (${c.revs.filter(x=>x.s==='c').length})</h3><div class="max-h-80 overflow-y-auto space-y-2">${c.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join(''))).map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div></div>`:''}`}</div>`:''}
+${e.aba==='revs'?(()=>{
+  if(c.revs.length===0) return `<div><h2 class="text-2xl font-bold mb-4">🔄 Revisões por Data — ${c.nome}</h2><div class="text-center py-16 bg-gray-50 rounded-xl"><span class="text-6xl block mb-3">🔄</span><p class="text-gray-500 text-lg">Nenhuma revisão ainda</p><p class="text-gray-400 text-sm mt-2">Complete aulas no Plano!</p></div></div>`;
+
+  const segunda = segundaDeData(addDias(new Date(), revsSemanaOffset*7));
+  const segundaISO = toISO(segunda);
+  const domingoISO = addDiasISO(segundaISO,6);
+  const rangeLabel = `${fmtDMY(segunda)} — ${fmtDMY(addDias(segunda,6))}`;
+  const hj = hojeISO();
+
+  const pendentesTodas = c.revs.filter(x=>x.s==='p').sort((a,b)=>a.dr.split('/').reverse().join('').localeCompare(b.dr.split('/').reverse().join('')));
+  const pendentesSemana = pendentesTodas.filter(r=>{const iso=dmyParaISO(r.dr); return iso>=segundaISO && iso<=domingoISO;});
+  const maisAntigaPendente = pendentesTodas[0];
+
+  const completasTodas = c.revs.filter(x=>x.s==='c').sort((a,b)=>b.dr.split('/').reverse().join('').localeCompare(a.dr.split('/').reverse().join('')));
+  const completasSemana = completasTodas.filter(r=>{const iso=dmyParaISO(r.dr); return iso>=segundaISO && iso<=domingoISO;});
+
+  return `<div>
+<h2 class="text-2xl font-bold mb-2">🔄 Revisões por Data — ${c.nome}</h2>
+<div class="flex items-center gap-3 mb-6 flex-wrap">
+  <button onclick="mudarSemanaRevs(-1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Semana anterior">←</button>
+  <div class="font-bold text-gray-700 text-sm min-w-[180px] text-center">${rangeLabel}</div>
+  <button onclick="mudarSemanaRevs(1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Próxima semana">→</button>
+  ${revsSemanaOffset!==0?`<button onclick="irParaSemanaAtualRevs()" class="text-indigo-600 hover:underline text-xs font-bold">Voltar pra hoje</button>`:''}
+  ${maisAntigaPendente?`<button onclick="irParaSemanaRevsDaData('${maisAntigaPendente.dr}')" class="text-indigo-600 hover:underline text-xs font-bold">Ir para a pendência mais antiga</button>`:''}
+</div>
+
+<div class="mb-8">
+<h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes nessa semana (${pendentesSemana.length})</h3>
+${pendentesSemana.length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente nessa semana!</p>':`<div class="space-y-3">${pendentesSemana.map(r=>{
+  const atrasada = dmyParaISO(r.dr) < hj;
+  return `<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all">
+  <div class="flex flex-col md:flex-row justify-between gap-4">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-2xl">📅</span>
+        <strong class="text-xl">${r.dr}</strong>
+        <button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button>
+        ${atrasada?'<span class="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">atrasada</span>':''}
+      </div>
+      <h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4>
+      <div class="flex gap-2 flex-wrap text-xs mb-3">
+        <span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span>
+        <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
+        <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>
+      </div>
+      ${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
+    </div>
+    <button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button>
+  </div>
+</div>`;
+}).join('')}</div>`}
+</div>
+
+${completasSemana.length>0?`<div>
+<h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas nessa semana (${completasSemana.length})</h3>
+<div class="max-h-80 overflow-y-auto space-y-2">${completasSemana.map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div>
+</div>`:''}
+</div>`;
+})():''}
 
 ${e.aba==='questoes'?`
 <h2 class="text-2xl font-bold mb-6">✍️ Questões — ${c.nome}</h2>
@@ -1335,6 +1406,9 @@ ${svgChartPomodoros(14)}
   window.mudarSemanaAgenda = mudarSemanaAgenda;
   window.irParaSemanaAtualAgenda = irParaSemanaAtualAgenda;
   window.irParaSemanaDaData = irParaSemanaDaData;
+  window.mudarSemanaRevs = mudarSemanaRevs;
+  window.irParaSemanaAtualRevs = irParaSemanaAtualRevs;
+  window.irParaSemanaRevsDaData = irParaSemanaRevsDaData;
   window.salvarRotinaCelula = salvarRotinaCelula;
   window.salvarHorarioLinha = salvarHorarioLinha;
   window.salvarHorasEstudoRotina = salvarHorasEstudoRotina;
