@@ -769,19 +769,45 @@ function mediaDiariaSemana(){
 
 // ===== PDs / POMODORO (por cronograma) =====
 const POMO_DURACAO = 25*60;
+const POMO_PAUSA_DURACAO = 5*60;
 let pomoSegundos = POMO_DURACAO;
 let pomoRodando = false;
 let pomoIntervalId = null;
+let pomoEmPausa = false;
+let pomoAudioCtx = null;
 
 function pomoFmt(s){
   const m=Math.floor(s/60).toString().padStart(2,'0');
   const ss=(s%60).toString().padStart(2,'0');
   return `${m}:${ss}`;
 }
+function pomoAudioUnlock(){
+  try{
+    if(!pomoAudioCtx) pomoAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(pomoAudioCtx.state==='suspended') pomoAudioCtx.resume();
+  }catch(err){}
+}
+function pomoAlarme(){
+  try{
+    if(!pomoAudioCtx) pomoAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const ctx = pomoAudioCtx;
+    const tocar=(t,freq)=>{
+      const osc=ctx.createOscillator(), gain=ctx.createGain();
+      osc.type='sine'; osc.frequency.value=freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime+t);
+      gain.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime+t+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+t+0.35);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(ctx.currentTime+t); osc.stop(ctx.currentTime+t+0.4);
+    };
+    tocar(0,880); tocar(0.45,880); tocar(0.9,1175);
+  }catch(err){}
+}
 function pomoToggle(){
   if(pomoRodando){
     pomoRodando=false; clearInterval(pomoIntervalId);
   } else {
+    pomoAudioUnlock();
     pomoRodando=true;
     pomoIntervalId=setInterval(pomoTick,1000);
   }
@@ -792,16 +818,33 @@ function pomoTick(){
   const disp = document.getElementById('pomo-display');
   if(disp) disp.textContent = pomoFmt(pomoSegundos);
   if(pomoSegundos<=0){
-    clearInterval(pomoIntervalId); pomoRodando=false;
-    currentC().pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR')});
-    sv();
-    pomoSegundos = POMO_DURACAO;
+    clearInterval(pomoIntervalId);
+    pomoAlarme();
+    if(!pomoEmPausa){
+      currentC().pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR')});
+      sv();
+      ntf('🍅 PD concluído! Pausa de 5 minutos iniciada.');
+      pomoEmPausa = true;
+      pomoSegundos = POMO_PAUSA_DURACAO;
+      pomoIntervalId = setInterval(pomoTick,1000);
+    } else {
+      ntf('☕ Pausa concluída! Pronto para o próximo PD.');
+      pomoEmPausa = false;
+      pomoRodando = false;
+      pomoSegundos = POMO_DURACAO;
+    }
     rend();
-    ntf('🍅 PD concluído! +25min registrados.');
   }
+}
+function pomoPularPausa(){
+  pomoRodando=false; clearInterval(pomoIntervalId);
+  pomoEmPausa=false;
+  pomoSegundos = POMO_DURACAO;
+  rend();
 }
 function pomoReset(){
   pomoRodando=false; clearInterval(pomoIntervalId);
+  pomoEmPausa=false;
   pomoSegundos = POMO_DURACAO;
   rend();
 }
@@ -1111,12 +1154,14 @@ ${c.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
 
 ${e.aba==='foco'?`
 <h2 class="text-2xl font-bold mb-2">🍅 Foco — ${c.nome}</h2>
-<p class="text-gray-500 text-sm mb-6">Cada PD (Pomodoro de Estudo) dura 25 minutos. Clique em iniciar quando começar a estudar; o tempo é contabilizado automaticamente ao terminar.</p>
+<p class="text-gray-500 text-sm mb-6">Cada PD (Pomodoro de Estudo) dura 25 minutos, seguido de uma pausa automática de 5 minutos. Um alarme soa no PC ao final de cada etapa.</p>
 
-<div class="flex flex-col items-center bg-gray-50 rounded-2xl p-8 mb-8">
-  <div id="pomo-display" class="text-6xl font-bold text-orange-600 mb-6 tabular-nums">${pomoFmt(pomoSegundos)}</div>
+<div class="flex flex-col items-center ${pomoEmPausa?'bg-blue-50':'bg-gray-50'} rounded-2xl p-8 mb-8">
+  <p class="text-sm font-bold ${pomoEmPausa?'text-blue-600':'text-orange-600'} mb-2">${pomoEmPausa?'☕ Pausa':'🧠 Estudo (PD)'}</p>
+  <div id="pomo-display" class="text-6xl font-bold ${pomoEmPausa?'text-blue-600':'text-orange-600'} mb-6 tabular-nums">${pomoFmt(pomoSegundos)}</div>
   <div class="flex gap-3">
-    <button onclick="pomoToggle()" class="bg-orange-500 hover:bg-orange-600 text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md">${pomoRodando?'⏸ Pausar':'▶ Iniciar PD'}</button>
+    <button onclick="pomoToggle()" class="${pomoEmPausa?'bg-blue-500 hover:bg-blue-600':'bg-orange-500 hover:bg-orange-600'} text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md">${pomoRodando?'⏸ Pausar':(pomoEmPausa?'▶ Retomar pausa':'▶ Iniciar PD')}</button>
+    ${pomoEmPausa?`<button onclick="pomoPularPausa()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-bold">⏭ Pular pausa</button>`:''}
     <button onclick="pomoReset()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-bold">↺ Reiniciar</button>
   </div>
 </div>
@@ -1160,6 +1205,7 @@ ${svgChartPomodoros(14)}
   window.delQuestao = delQuestao;
   window.pomoToggle = pomoToggle;
   window.pomoReset = pomoReset;
+  window.pomoPularPausa = pomoPularPausa;
   window.exp = exp;
   window.imp = imp;
   window.rst = rst;
