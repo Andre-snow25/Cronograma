@@ -360,6 +360,15 @@ function irParaSemanaRevsDaData(dmy){
   revsSemanaOffset = offsetDaSemanaDeData(dmyParaISO(dmy));
   rend();
 }
+function agruparPorData(lista){
+  const grupos = [];
+  const mapa = {};
+  lista.forEach(r=>{
+    if(!mapa[r.dr]){ mapa[r.dr] = {dr:r.dr, itens:[]}; grupos.push(mapa[r.dr]); }
+    mapa[r.dr].itens.push(r);
+  });
+  return grupos;
+}
 
 function gerarAgenda(){
   const c = currentC();
@@ -1375,26 +1384,33 @@ ${e.aba==='revs'?(()=>{
 
 <div class="mb-8">
 <h3 class="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2"><span class="text-2xl">⏰</span>Pendentes nessa semana (${pendentesSemana.length})</h3>
-${pendentesSemana.length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente nessa semana!</p>':`<div class="space-y-3">${pendentesSemana.map(r=>{
-  const atrasada = dmyParaISO(r.dr) < hj;
-  return `<div class="border-l-4 border-${r.cor}-500 bg-white rounded-xl p-5 hover:shadow-xl transition-all">
-  <div class="flex flex-col md:flex-row justify-between gap-4">
-    <div class="flex-1 min-w-0">
-      <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xl">📅</span>
-        <strong class="text-xl">${r.dr}</strong>
-        <button onclick="editData('${r.id}')" class="ml-2 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button>
-        ${atrasada?'<span class="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">atrasada</span>':''}
+${pendentesSemana.length===0?'<p class="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">Nenhuma revisão pendente nessa semana!</p>':`<div class="space-y-3">${agruparPorData(pendentesSemana).map(grupo=>{
+  const atrasada = dmyParaISO(grupo.dr) < hj;
+  return `<div class="border-l-4 border-orange-400 bg-white rounded-xl p-5 hover:shadow-xl transition-all">
+  <div class="flex items-center gap-2 mb-3">
+    <span class="text-2xl">📅</span>
+    <strong class="text-xl">${grupo.dr}</strong>
+    ${atrasada?'<span class="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">atrasada</span>':''}
+    ${grupo.itens.length>1?`<span class="text-xs text-gray-400 font-bold">${grupo.itens.length} matérias</span>`:''}
+  </div>
+  <div class="space-y-4">
+${grupo.itens.map((r,i)=>`  <div class="${i>0?'border-t border-gray-100 pt-4':''}">
+    <div class="flex flex-col md:flex-row justify-between gap-4">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-2">
+          <h4 class="font-bold text-lg break-words">${r.ma}</h4>
+          <button onclick="editData('${r.id}')" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button>
+        </div>
+        <div class="flex gap-2 flex-wrap text-xs mb-3">
+          <span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span>
+          <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
+          <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>
+        </div>
+        ${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
       </div>
-      <h4 class="font-bold text-lg mb-2 break-words">${r.ma}</h4>
-      <div class="flex gap-2 flex-wrap text-xs mb-3">
-        <span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span>
-        <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
-        <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>
-      </div>
-      ${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
+      <button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button>
     </div>
-    <button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button>
+  </div>`).join('')}
   </div>
 </div>`;
 }).join('')}</div>`}
@@ -1402,7 +1418,18 @@ ${pendentesSemana.length===0?'<p class="text-gray-500 text-center py-8 bg-gray-5
 
 ${completasSemana.length>0?`<div>
 <h3 class="text-lg font-bold text-green-900 mb-4 flex items-center gap-2"><span class="text-2xl">✅</span>Completas nessa semana (${completasSemana.length})</h3>
-<div class="max-h-80 overflow-y-auto space-y-2">${completasSemana.map(r=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75"><div class="flex items-center gap-2 mb-1"><span>📅</span><strong>${r.dr}</strong></div><h4 class="font-bold line-through text-gray-700">${r.ma}</h4><div class="flex gap-2 text-xs mt-2"><span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span><span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span></div></div>`).join('')}</div>
+<div class="max-h-80 overflow-y-auto space-y-2">${agruparPorData(completasSemana).map(grupo=>`<div class="border-l-4 border-green-500 bg-green-50 rounded-xl p-4 opacity-75">
+  <div class="flex items-center gap-2 mb-2"><span>📅</span><strong>${grupo.dr}</strong></div>
+  <div class="space-y-2">
+${grupo.itens.map(r=>`  <div>
+    <h4 class="font-bold line-through text-gray-700">${r.ma}</h4>
+    <div class="flex gap-2 text-xs mt-1">
+      <span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span>
+      <span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span>
+    </div>
+  </div>`).join('')}
+  </div>
+</div>`).join('')}</div>
 </div>`:''}
 </div>`;
 })():''}
