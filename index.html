@@ -814,20 +814,27 @@ function desempenhoBadge(pct){
 }
 
 // ===== PDs / POMODORO (por cronograma) =====
-// O cronometro se baseia no horario real (pomoFimEm), nao em contagem de ticks:
+// Fases: idle -> estudo -> aguardando -> (extra -> pausa) | pausa -> idle
+// "aguardando" é a pausa de decisão logo após os 25min: o usuário escolhe
+// continuar estudando a mesma matéria (fase "extra", contando os minutos a mais
+// até ele parar) ou já ir pra pausa de 5min.
+// O cronometro se baseia no horario real (timestamps), nao em contagem de ticks:
 // isso evita que o tempo fique errado quando a aba fica em segundo plano
 // (navegadores reduzem a frequencia do setInterval) e permite retomar
 // corretamente apos um reload/troca de aba, guardando o estado no localStorage.
 const POMO_DURACAO = 25*60;
 const POMO_PAUSA_DURACAO = 5*60;
 const POMO_STORAGE_KEY = 'pomoState';
+let pomoEstado = 'idle'; // idle | estudo | aguardando | extra | pausa
 let pomoSegundos = POMO_DURACAO;
 let pomoRodando = false;
 let pomoIntervalId = null;
-let pomoEmPausa = false;
 let pomoAudioCtx = null;
-let pomoFimEm = null;
+let pomoFimEm = null;           // contagem regressiva (estudo/pausa)
+let pomoExtraInicioEm = null;   // contagem progressiva (extra) - inicio do trecho em execucao, null se pausado
+let pomoExtraAcumulado = 0;     // segundos acumulados de trechos anteriores do extra
 let pomoCronoId = null;
+let pomoRegistroAtualId = null; // id do registro em pomodoros[] que recebe os minutos extras
 
 function pomoFmt(s){
   const m=Math.floor(s/60).toString().padStart(2,'0');
@@ -858,16 +865,31 @@ function pomoAlarme(){
 }
 function pomoSalvarEstado(){
   try{
-    if(pomoRodando && pomoFimEm){
-      localStorage.setItem(POMO_STORAGE_KEY, JSON.stringify({emPausa:pomoEmPausa, fimEm:pomoFimEm, cronoId:pomoCronoId}));
+    if((pomoEstado==='estudo'||pomoEstado==='pausa') && pomoRodando && pomoFimEm){
+      localStorage.setItem(POMO_STORAGE_KEY, JSON.stringify({estado:pomoEstado, fimEm:pomoFimEm, cronoId:pomoCronoId}));
+    } else if(pomoEstado==='extra'){
+      localStorage.setItem(POMO_STORAGE_KEY, JSON.stringify({estado:'extra', cronoId:pomoCronoId, registroId:pomoRegistroAtualId, rodando:pomoRodando, inicioEm:pomoExtraInicioEm, acumulado:pomoExtraAcumulado}));
     } else {
       localStorage.removeItem(POMO_STORAGE_KEY);
     }
   }catch(err){}
 }
-function pomoCreditarPD(){
+function pomoCreditarPD(min){
   const cron = e.cronogramas.find(c=>c.id===pomoCronoId) || currentC();
-  cron.pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR')});
+  const registro = {id:Date.now(), data: new Date().toLocaleDateString('pt-BR'), min};
+  cron.pomodoros.push(registro);
+  sv();
+  return registro.id;
+}
+function pomoAdicionarMinutosExtras(min){
+  if(min<=0) return;
+  const cron = e.cronogramas.find(c=>c.id===pomoCronoId) || currentC();
+  const registro = cron.pomodoros.find(p=>p.id===pomoRegistroAtualId);
+  if(registro){
+    registro.min = (registro.min||25) + min;
+  } else {
+    cron.pomodoros.push({id:Date.now(), data: new Date().toLocaleDateString('pt-BR'), min});
+  }
   sv();
 }
 function pomoRestaurarEstado(){
@@ -875,34 +897,59 @@ function pomoRestaurarEstado(){
     const raw = localStorage.getItem(POMO_STORAGE_KEY);
     if(!raw) return;
     const st = JSON.parse(raw);
-    if(!st || !st.fimEm) return;
-    pomoEmPausa = !!st.emPausa;
+    if(!st || !st.estado) return;
     pomoCronoId = st.cronoId;
+
+    if(st.estado==='extra'){
+      pomoEstado = 'extra';
+      pomoRegistroAtualId = st.registroId;
+      pomoExtraAcumulado = st.acumulado||0;
+      if(st.rodando && st.inicioEm){
+        pomoExtraInicioEm = st.inicioEm;
+        pomoRodando = true;
+        pomoIntervalId = setInterval(pomoTick,1000);
+      } else {
+        pomoExtraInicioEm = null;
+        pomoRodando = false;
+      }
+      ntf('🍅 Sessão de estudo extra retomada.');
+      rend();
+      return;
+    }
+
+    if(!st.fimEm) return;
+    let estado = st.estado;
     let fimEm = st.fimEm;
     let restante = fimEm - Date.now();
     let seguirRodando = true;
-    // processa fases que ja terminaram enquanto a aba estava em segundo plano/fechada
-    while(restante<=0 && seguirRodando){
-      if(!pomoEmPausa){
-        pomoCreditarPD();
-        pomoEmPausa = true;
-        fimEm += POMO_PAUSA_DURACAO*1000;
-        restante = fimEm - Date.now();
-      } else {
-        seguirRodando = false;
+    // processa a fase que ja terminou enquanto a aba estava em segundo plano/fechada
+    if(restante<=0){
+      seguirRodando = false;
+      if(estado==='estudo'){
+        pomoRegistroAtualId = pomoCreditarPD(25);
+        estado = 'aguardando';
       }
     }
     if(seguirRodando){
+      pomoEstado = estado;
       pomoRodando = true;
       pomoFimEm = fimEm;
       pomoSegundos = Math.max(0, Math.round(restante/1000));
       pomoIntervalId = setInterval(pomoTick,1000);
-      ntf('🍅 Contagem do PD retomada.');
+      ntf('🍅 Contagem retomada.');
+    } else if(estado==='aguardando'){
+      pomoEstado='aguardando';
+      pomoRodando=false;
+      pomoFimEm=null;
+      pomoSegundos=POMO_DURACAO;
+      localStorage.removeItem(POMO_STORAGE_KEY);
+      ntf('🍅 PD concluído enquanto você estava fora! Continue estudando ou faça uma pausa.');
     } else {
-      pomoEmPausa = false;
-      pomoRodando = false;
-      pomoFimEm = null;
-      pomoSegundos = POMO_DURACAO;
+      pomoEstado='idle';
+      pomoRodando=false;
+      pomoFimEm=null;
+      pomoSegundos=POMO_DURACAO;
+      pomoRegistroAtualId=null;
       localStorage.removeItem(POMO_STORAGE_KEY);
       ntf('☕ Pausa concluída enquanto você estava fora. Pronto para o próximo PD.');
     }
@@ -910,63 +957,135 @@ function pomoRestaurarEstado(){
   }catch(err){}
 }
 function pomoToggle(){
-  if(pomoRodando){
-    pomoRodando=false; clearInterval(pomoIntervalId);
-    pomoFimEm = null;
-    pomoSalvarEstado();
-  } else {
+  if(pomoEstado==='idle'){
     pomoAudioUnlock();
-    if(!pomoEmPausa) pomoCronoId = currentC().id;
-    pomoRodando=true;
+    pomoCronoId = currentC().id;
+    pomoEstado = 'estudo';
+    pomoRodando = true;
     pomoFimEm = Date.now() + pomoSegundos*1000;
-    pomoIntervalId=setInterval(pomoTick,1000);
+    pomoIntervalId = setInterval(pomoTick,1000);
     pomoSalvarEstado();
+    rend();
+    return;
   }
-  rend();
+  if(pomoEstado==='estudo' || pomoEstado==='pausa'){
+    if(pomoRodando){
+      pomoRodando=false; clearInterval(pomoIntervalId);
+      pomoFimEm = null;
+    } else {
+      pomoAudioUnlock();
+      pomoRodando=true;
+      pomoFimEm = Date.now() + pomoSegundos*1000;
+      pomoIntervalId = setInterval(pomoTick,1000);
+    }
+    pomoSalvarEstado();
+    rend();
+    return;
+  }
+  if(pomoEstado==='extra'){
+    if(pomoRodando){
+      pomoExtraAcumulado += Math.floor((Date.now()-pomoExtraInicioEm)/1000);
+      pomoExtraInicioEm = null;
+      pomoRodando = false;
+      clearInterval(pomoIntervalId);
+    } else {
+      pomoAudioUnlock();
+      pomoExtraInicioEm = Date.now();
+      pomoRodando = true;
+      pomoIntervalId = setInterval(pomoTick,1000);
+    }
+    pomoSalvarEstado();
+    rend();
+    return;
+  }
 }
 function pomoTick(){
-  if(!pomoFimEm) return;
-  pomoSegundos = Math.max(0, Math.round((pomoFimEm - Date.now())/1000));
-  const disp = document.getElementById('pomo-display');
-  if(disp) disp.textContent = pomoFmt(pomoSegundos);
-  if(pomoSegundos<=0){
-    clearInterval(pomoIntervalId);
-    pomoAlarme();
-    if(!pomoEmPausa){
-      pomoCreditarPD();
-      ntf('🍅 PD concluído! Pausa de 5 minutos iniciada.');
-      pomoEmPausa = true;
-      pomoFimEm = Date.now() + POMO_PAUSA_DURACAO*1000;
-      pomoSegundos = POMO_PAUSA_DURACAO;
-      pomoIntervalId = setInterval(pomoTick,1000);
+  if(pomoEstado==='estudo' || pomoEstado==='pausa'){
+    if(!pomoFimEm) return;
+    pomoSegundos = Math.max(0, Math.round((pomoFimEm - Date.now())/1000));
+    const disp = document.getElementById('pomo-display');
+    if(disp) disp.textContent = pomoFmt(pomoSegundos);
+    if(pomoSegundos<=0){
+      clearInterval(pomoIntervalId);
+      pomoAlarme();
+      if(pomoEstado==='estudo'){
+        pomoRegistroAtualId = pomoCreditarPD(25);
+        ntf('🍅 PD concluído! Continue estudando ou faça uma pausa.');
+        pomoEstado = 'aguardando';
+        pomoRodando = false;
+        pomoFimEm = null;
+        pomoSegundos = POMO_DURACAO;
+      } else {
+        ntf('☕ Pausa concluída! Pronto para o próximo PD.');
+        pomoEstado = 'idle';
+        pomoRodando = false;
+        pomoFimEm = null;
+        pomoSegundos = POMO_DURACAO;
+        pomoRegistroAtualId = null;
+      }
       pomoSalvarEstado();
-    } else {
-      ntf('☕ Pausa concluída! Pronto para o próximo PD.');
-      pomoEmPausa = false;
-      pomoRodando = false;
-      pomoFimEm = null;
-      pomoSegundos = POMO_DURACAO;
-      pomoSalvarEstado();
+      rend();
     }
-    rend();
+    return;
+  }
+  if(pomoEstado==='extra'){
+    if(!pomoExtraInicioEm) return;
+    const elapsed = pomoExtraAcumulado + Math.floor((Date.now()-pomoExtraInicioEm)/1000);
+    const disp = document.getElementById('pomo-display');
+    if(disp) disp.textContent = pomoFmt(elapsed);
   }
 }
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='visible' && pomoRodando) pomoTick();
 });
+function pomoContinuarEstudando(){
+  pomoAudioUnlock();
+  pomoEstado = 'extra';
+  pomoExtraAcumulado = 0;
+  pomoExtraInicioEm = Date.now();
+  pomoRodando = true;
+  pomoIntervalId = setInterval(pomoTick,1000);
+  pomoSalvarEstado();
+  rend();
+}
+function pomoIniciarPausa(){
+  pomoAudioUnlock();
+  pomoEstado = 'pausa';
+  pomoRodando = true;
+  pomoFimEm = Date.now() + POMO_PAUSA_DURACAO*1000;
+  pomoSegundos = POMO_PAUSA_DURACAO;
+  pomoIntervalId = setInterval(pomoTick,1000);
+  pomoSalvarEstado();
+  rend();
+}
+function pomoPararExtra(){
+  clearInterval(pomoIntervalId);
+  const totalSegundos = pomoExtraAcumulado + (pomoRodando && pomoExtraInicioEm ? Math.floor((Date.now()-pomoExtraInicioEm)/1000) : 0);
+  const minutosExtras = Math.round(totalSegundos/60);
+  pomoAdicionarMinutosExtras(minutosExtras);
+  ntf(`✅ +${minutosExtras} minuto(s) extra registrados nesse PD!`);
+  pomoExtraInicioEm = null;
+  pomoExtraAcumulado = 0;
+  pomoRodando = false;
+  pomoIniciarPausa();
+}
 function pomoPularPausa(){
   pomoRodando=false; clearInterval(pomoIntervalId);
-  pomoEmPausa=false;
+  pomoEstado = 'idle';
   pomoFimEm=null;
   pomoSegundos = POMO_DURACAO;
+  pomoRegistroAtualId = null;
   pomoSalvarEstado();
   rend();
 }
 function pomoReset(){
   pomoRodando=false; clearInterval(pomoIntervalId);
-  pomoEmPausa=false;
+  pomoEstado = 'idle';
   pomoFimEm=null;
+  pomoExtraInicioEm=null;
+  pomoExtraAcumulado=0;
   pomoSegundos = POMO_DURACAO;
+  pomoRegistroAtualId = null;
   pomoSalvarEstado();
   rend();
 }
@@ -989,7 +1108,8 @@ function pomodorosTotal(){
   return currentC().pomodoros.length;
 }
 function minutosSemana(){
-  return pomodorosSemana()*25;
+  const dias=diasAtras(7);
+  return currentC().pomodoros.filter(p=>dias.includes(p.data)).reduce((s,p)=>s+(p.min||25),0);
 }
 
 // Gráfico de barras (SVG) genérico
@@ -1369,17 +1489,42 @@ ${c.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
 
 ${e.aba==='foco'?`
 <h2 class="text-2xl font-bold mb-2">🍅 Foco — ${c.nome}</h2>
-<p class="text-gray-500 text-sm mb-6">Cada PD (Pomodoro de Estudo) dura 25 minutos, seguido de uma pausa automática de 5 minutos. Um alarme soa no PC ao final de cada etapa.</p>
+<p class="text-gray-500 text-sm mb-6">Cada PD (Pomodoro de Estudo) dura 25 minutos. Ao terminar, você escolhe entre continuar estudando a mesma matéria (contando os minutos extras) ou já iniciar a pausa de 5 minutos. Um alarme soa no PC ao final de cada etapa.</p>
 
-<div class="flex flex-col items-center ${pomoEmPausa?'bg-blue-50':'bg-gray-50'} rounded-2xl p-8 mb-8">
-  <p class="text-sm font-bold ${pomoEmPausa?'text-blue-600':'text-orange-600'} mb-2">${pomoEmPausa?'☕ Pausa':'🧠 Estudo (PD)'}</p>
-  <div id="pomo-display" class="text-6xl font-bold ${pomoEmPausa?'text-blue-600':'text-orange-600'} mb-6 tabular-nums">${pomoFmt(pomoSegundos)}</div>
-  <div class="flex gap-3">
-    <button onclick="pomoToggle()" class="${pomoEmPausa?'bg-blue-500 hover:bg-blue-600':'bg-orange-500 hover:bg-orange-600'} text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md">${pomoRodando?'⏸ Pausar':(pomoEmPausa?'▶ Retomar pausa':'▶ Iniciar PD')}</button>
-    ${pomoEmPausa?`<button onclick="pomoPularPausa()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-bold">⏭ Pular pausa</button>`:''}
+${(()=>{
+  if(pomoEstado==='aguardando'){
+    return `<div class="flex flex-col items-center bg-green-50 rounded-2xl p-8 mb-8">
+  <p class="text-sm font-bold text-green-700 mb-2">✅ PD concluído!</p>
+  <div class="text-5xl mb-4">🎉</div>
+  <p class="text-gray-600 text-sm mb-5 text-center">Quer continuar estudando essa matéria ou já fazer a pausa de 5 minutos?</p>
+  <div class="flex gap-3 flex-wrap justify-center">
+    <button onclick="pomoContinuarEstudando()" class="bg-violet-500 hover:bg-violet-600 text-white px-6 py-3 rounded-xl font-bold text-lg shadow-md">▶ Continuar estudando</button>
+    <button onclick="pomoIniciarPausa()" class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-lg shadow-md">☕ Iniciar pausa</button>
+  </div>
+</div>`;
+  }
+  const cfg = {
+    estudo: {bg:'bg-gray-50', cor:'text-orange-600', label:'🧠 Estudo (PD)'},
+    extra:  {bg:'bg-violet-50', cor:'text-violet-600', label:'➕ Estudo extra'},
+    pausa:  {bg:'bg-blue-50', cor:'text-blue-600', label:'☕ Pausa'},
+    idle:   {bg:'bg-gray-50', cor:'text-orange-600', label:'🧠 Estudo (PD)'}
+  }[pomoEstado];
+  const display = pomoEstado==='extra'
+    ? pomoFmt(pomoExtraAcumulado + (pomoRodando && pomoExtraInicioEm ? Math.floor((Date.now()-pomoExtraInicioEm)/1000) : 0))
+    : pomoFmt(pomoSegundos);
+  const btnCor = pomoEstado==='extra' ? 'bg-violet-500 hover:bg-violet-600' : (pomoEstado==='pausa' ? 'bg-blue-500 hover:bg-blue-600' : 'bg-orange-500 hover:bg-orange-600');
+  const btnLabel = pomoRodando ? '⏸ Pausar' : (pomoEstado==='idle' ? '▶ Iniciar PD' : '▶ Continuar');
+  return `<div class="flex flex-col items-center ${cfg.bg} rounded-2xl p-8 mb-8">
+  <p class="text-sm font-bold ${cfg.cor} mb-2">${cfg.label}</p>
+  <div id="pomo-display" class="text-6xl font-bold ${cfg.cor} mb-6 tabular-nums">${display}</div>
+  <div class="flex gap-3 flex-wrap justify-center">
+    <button onclick="pomoToggle()" class="${btnCor} text-white px-8 py-3 rounded-xl font-bold text-lg shadow-md">${btnLabel}</button>
+    ${pomoEstado==='pausa'?`<button onclick="pomoPularPausa()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-bold">⏭ Pular pausa</button>`:''}
+    ${pomoEstado==='extra'?`<button onclick="pomoPararExtra()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-bold">⏹ Parar e registrar</button>`:''}
     <button onclick="pomoReset()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-6 py-3 rounded-xl font-bold">↺ Reiniciar</button>
   </div>
-</div>
+</div>`;
+})()}
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
 <div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">📅 PDs hoje</p><p class="text-3xl font-bold text-orange-700">${pomodorosHoje()}</p></div>
@@ -1424,6 +1569,9 @@ ${svgChartPomodoros(14)}
   window.pomoToggle = pomoToggle;
   window.pomoReset = pomoReset;
   window.pomoPularPausa = pomoPularPausa;
+  window.pomoContinuarEstudando = pomoContinuarEstudando;
+  window.pomoIniciarPausa = pomoIniciarPausa;
+  window.pomoPararExtra = pomoPararExtra;
   window.exp = exp;
   window.imp = imp;
   window.rst = rst;
