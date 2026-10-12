@@ -72,6 +72,6 @@ Gabarito: ${gabarito || '(não informado)'}`;
     if (err instanceof Anthropic.AuthenticationError) return res.status(500).json({ erro: 'Chave da API inválida (ANTHROPIC_API_KEY).' });
     if (err instanceof Anthropic.RateLimitError) return res.status(429).json({ erro: 'Muitas análises seguidas. Aguarde um pouco.' });
     if (err instanceof Anthropic.APIError) return res.status(502).json({ erro: 'Erro na IA: ' + err.message });
-    return res.status(500).json({ erro: 'Erro inesperado na análise.' });
+    return res.status(500).json({ erro: 'Erro inesperado na análise: ' + (err?.message || err) });
   }
 }
