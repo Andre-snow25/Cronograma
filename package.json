@@ -1,0 +1,9 @@
+{
+  "name": "cronograma",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "zod": "^3.25.76"
+  }
+}

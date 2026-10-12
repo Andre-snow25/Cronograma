@@ -79,7 +79,7 @@ function novoCronogramaObj(nome){
     cron: [], dias: [], revs: [],
     stats: {a:0,d:0,r:0},
     titulos: {}, dataReprogramacao: null,
-    questoes: [], pomodoros: [],
+    questoes: [], pomodoros: [], analises: [],
     agenda: null, agendaConcluidos: {},
     rotina: rotinaPadrao()
   };
@@ -143,6 +143,7 @@ function migrar(data){
       if(!c.pomodoros) c.pomodoros=[];
       if(!c.titulos) c.titulos={};
       if(!c.questoes) c.questoes=[];
+      if(!c.analises) c.analises=[];
       if(c.dataReprogramacao===undefined) c.dataReprogramacao=null;
       if(c.agenda===undefined) c.agenda=null;
       if(!c.agendaConcluidos) c.agendaConcluidos={};
@@ -786,6 +787,133 @@ function registrarQuestoes(ma){
     sv();rend();
     ntf(`🎉 +${qtd} questões em ${ma} (${acertos} acertos, ${qtd-acertos} erros)!`);
   };
+}
+
+// ===== ANÁLISE DE QUESTÃO ERRADA COM IA (api/analisar.js → Claude) =====
+function escHtml(s){
+  return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function analisesHtml(ma){
+  const lista = (currentC().analises||[]).filter(a=>a.ma===ma);
+  if(!lista.length) return '';
+  const cont = {};
+  lista.forEach(a=>{ cont[a.assunto]=(cont[a.assunto]||0)+1; });
+  const ranking = Object.entries(cont).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  return `
+    <div class="mt-5 border-t pt-4">
+      <p class="text-sm font-bold text-gray-700 mb-2">📌 Assuntos que você mais erra</p>
+      <ul class="text-sm space-y-1 mb-4">
+        ${ranking.map(([assunto,n])=>`<li class="flex justify-between gap-2"><span class="text-gray-700">${escHtml(assunto)}</span><span class="font-bold text-red-600 flex-shrink-0">${n}×</span></li>`).join('')}
+      </ul>
+      <details>
+        <summary class="text-sm font-bold text-gray-600 cursor-pointer">Histórico de análises (${lista.length})</summary>
+        <div class="space-y-2 mt-2 max-h-48 overflow-y-auto">
+          ${lista.slice().sort((a,b)=>b.id-a.id).map(a=>`
+            <div class="bg-gray-50 rounded-lg p-2 text-xs">
+              <div class="flex justify-between gap-2"><b>${escHtml(a.assunto)}</b><span class="text-gray-400 flex-shrink-0">${a.data}</span></div>
+              <p class="text-gray-500 mt-1 line-clamp-2">${escHtml(a.questao)}</p>
+              <button onclick="delAnalise(${a.id},'${ma.replace(/'/g,"\\'")}')" class="text-red-500 hover:underline mt-1">Remover</button>
+            </div>`).join('')}
+        </div>
+      </details>
+    </div>`;
+}
+
+function analisarErro(ma){
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:560px;max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold mb-1">🤖 Analisar questão errada</h3>
+        <p class="text-sm text-gray-500 mb-4">${escHtml(ma)}</p>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Enunciado e alternativas</label>
+        <textarea id="ia-questao" rows="7" placeholder="Cole aqui a questão completa, com as alternativas"
+          class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-purple-500 focus:outline-none"></textarea>
+
+        <div class="grid grid-cols-2 gap-3 mb-4">
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">❌ Marquei</label>
+            <input id="ia-resposta" placeholder="Ex: C" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-purple-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">✅ Gabarito</label>
+            <input id="ia-gabarito" placeholder="Ex: A (opcional)" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-purple-500 focus:outline-none">
+          </div>
+        </div>
+
+        <div id="ia-resultado"></div>
+
+        <div class="flex gap-3 mt-4">
+          <button id="ia-fechar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Fechar</button>
+          <button id="ia-analisar" class="flex-1 bg-purple-600 text-white rounded-lg py-2.5 font-semibold hover:bg-purple-700">Analisar</button>
+        </div>
+
+        <div id="ia-historico">${analisesHtml(ma)}</div>
+      </div>
+    </div>`;
+
+  document.getElementById('ia-fechar').onclick = () => {
+    document.getElementById('modal-root').innerHTML = '';
+  };
+
+  document.getElementById('ia-analisar').onclick = async () => {
+    const questao = document.getElementById('ia-questao').value.trim();
+    const resposta = document.getElementById('ia-resposta').value.trim();
+    const gabarito = document.getElementById('ia-gabarito').value.trim();
+    if(!questao){ntf('❌ Cole o enunciado da questão','er');return;}
+
+    const btn = document.getElementById('ia-analisar');
+    const out = document.getElementById('ia-resultado');
+    btn.disabled = true; btn.textContent = 'Analisando...';
+    out.innerHTML = '<p class="text-sm text-gray-500">🤖 Analisando a questão...</p>';
+
+    try{
+      const token = await auth.currentUser.getIdToken();
+      const r = await fetch('/api/analisar',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body: JSON.stringify({materia:ma,questao,resposta,gabarito})
+      });
+      const dados = await r.json().catch(()=>({erro:'Resposta inválida do servidor.'}));
+      if(!r.ok) throw new Error(dados.erro||('Erro '+r.status));
+
+      out.innerHTML = `
+        <div class="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 text-sm space-y-2">
+          <p><span class="font-bold text-purple-700">📍 Reforce:</span> ${escHtml(dados.assunto)}</p>
+          <p><span class="font-bold text-red-600">❌ Por que errou:</span> ${escHtml(dados.motivo_erro)}</p>
+          <div><span class="font-bold text-green-700">📚 Revisar:</span>
+            <ul class="list-disc ml-5 mt-1">${(dados.revisar||[]).map(t=>`<li>${escHtml(t)}</li>`).join('')}</ul>
+          </div>
+        </div>`;
+
+      const hoje = new Date();
+      const c = currentC();
+      if(!c.analises) c.analises=[];
+      c.analises.push({
+        id: Date.now(), ma,
+        data: String(hoje.getDate()).padStart(2,'0')+'/'+String(hoje.getMonth()+1).padStart(2,'0')+'/'+hoje.getFullYear(),
+        assunto: dados.assunto, motivo_erro: dados.motivo_erro, revisar: dados.revisar||[],
+        questao: questao.slice(0,300)
+      });
+      sv();
+      document.getElementById('ia-historico').innerHTML = analisesHtml(ma);
+      ['ia-questao','ia-resposta','ia-gabarito'].forEach(id=>document.getElementById(id).value='');
+    }catch(err){
+      out.innerHTML = `<div class="bg-red-50 text-red-700 rounded-lg p-3 text-sm">❌ ${escHtml(err.message)}</div>`;
+    }finally{
+      btn.disabled = false; btn.textContent = 'Analisar';
+    }
+  };
+}
+
+function delAnalise(id, ma){
+  if(!confirm('Remover esta análise?')) return;
+  const c = currentC();
+  c.analises = (c.analises||[]).filter(a=>a.id!==id);
+  sv();
+  const h = document.getElementById('ia-historico');
+  if(h) h.innerHTML = analisesHtml(ma);
 }
 
 function delQuestao(id){
@@ -1595,7 +1723,10 @@ ${c.cron.map(item=>{
     <span class="text-sm text-purple-700 font-bold">${qtd} questões resolvidas</span>
     <p class="text-xs text-gray-600">${badge.rotulo}</p>
   </div>
-  <button onclick="registrarQuestoes('${item.ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap flex-shrink-0 shadow-md">+ Questões</button>
+  <div class="flex flex-col gap-2 flex-shrink-0">
+    <button onclick="registrarQuestoes('${item.ma.replace(/'/g,"\\'")}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap shadow-md">+ Questões</button>
+    <button onclick="analisarErro('${item.ma.replace(/'/g,"\\'")}')" class="bg-white border-2 border-purple-300 hover:bg-purple-100 text-purple-700 px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap">🤖 Analisar erro</button>
+  </div>
 </div>`;
 }).join('')}
 </div>`}
@@ -1695,6 +1826,8 @@ ${svgChartPomodoros(14)}
   window.editData = editData;
   window.registrarQuestoes = registrarQuestoes;
   window.delQuestao = delQuestao;
+  window.analisarErro = analisarErro;
+  window.delAnalise = delAnalise;
   window.pomoToggle = pomoToggle;
   window.pomoReset = pomoReset;
   window.pomoPularPausa = pomoPularPausa;
