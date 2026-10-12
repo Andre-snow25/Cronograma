@@ -808,13 +808,24 @@ function analisesHtml(ma){
       </ul>
       <details>
         <summary class="text-sm font-bold text-gray-600 cursor-pointer">Histórico de análises (${lista.length})</summary>
-        <div class="space-y-2 mt-2 max-h-48 overflow-y-auto">
+        <div class="space-y-2 mt-2 max-h-96 overflow-y-auto">
           ${lista.slice().sort((a,b)=>b.id-a.id).map(a=>`
-            <div class="bg-gray-50 rounded-lg p-2 text-xs">
-              <div class="flex justify-between gap-2"><b>${escHtml(a.assunto)}</b><span class="text-gray-400 flex-shrink-0">${a.data}</span></div>
-              <p class="text-gray-500 mt-1 line-clamp-2">${escHtml(a.questao)}</p>
+            <details class="bg-gray-50 rounded-lg p-2 text-xs">
+              <summary class="cursor-pointer list-none">
+                <div class="flex justify-between gap-2"><b>${escHtml(a.assunto)}</b><span class="text-gray-400 flex-shrink-0">${a.data}</span></div>
+                <p class="text-gray-500 mt-1 line-clamp-2">${escHtml(a.questao)}</p>
+                <span class="text-purple-600 font-semibold">Ver análise ▾</span>
+              </summary>
+              <div class="mt-2 space-y-2 border-t pt-2">
+                <p><span class="font-bold text-purple-700">📍 Reforce:</span> ${escHtml(a.assunto)}</p>
+                <p><span class="font-bold text-red-600">❌ Por que errou:</span> ${escHtml(a.motivo_erro)}</p>
+                <div><span class="font-bold text-green-700">📚 Revisar:</span>
+                  <ul class="list-disc ml-5 mt-1">${(a.revisar||[]).map(t=>`<li>${escHtml(t)}</li>`).join('')}</ul>
+                </div>
+                <p class="text-gray-500 whitespace-pre-wrap"><span class="font-bold">Questão:</span> ${escHtml(a.questao)}</p>
+              </div>
               <button onclick="delAnalise(${a.id},'${ma.replace(/'/g,"\\'")}')" class="text-red-500 hover:underline mt-1">Remover</button>
-            </div>`).join('')}
+            </details>`).join('')}
         </div>
       </details>
     </div>`;
@@ -894,7 +905,7 @@ function analisarErro(ma){
         id: Date.now(), ma,
         data: String(hoje.getDate()).padStart(2,'0')+'/'+String(hoje.getMonth()+1).padStart(2,'0')+'/'+hoje.getFullYear(),
         assunto: dados.assunto, motivo_erro: dados.motivo_erro, revisar: dados.revisar||[],
-        questao: questao.slice(0,300)
+        questao: questao.slice(0,2000)
       });
       sv();
       document.getElementById('ia-historico').innerHTML = analisesHtml(ma);
