@@ -206,6 +206,8 @@ async function loadFromCloud() {
       const data = docSnap.data();
       if(!migrar(data)) garantirCronogramaPadrao();
       showSyncStatus('Carregado da nuvem!','success');
+      // Corrige revisões da mesma sequência que caíram no mesmo dia (ex: 7d e 14d juntas)
+      if(ajustarTodasSequencias()) await saveToCloud();
     } else {
       // Primeira vez com esta conta: tenta trazer os dados do ID antigo (login por nome)
       const antigos = await carregarIdAntigo();
@@ -614,20 +616,68 @@ function parseDMY(s){const[d,m,y]=s.split('/');return new Date(+y,+m-1,+d);}
 function fmtDMY(d){return d.toLocaleDateString('pt-BR');}
 function addDias(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 
+// Sequência das revisões: `dias` = distância da 1ª revisão
+const INTERVALOS_REV=[
+  {t:'7d',  dias:0,  cor:'amber'},
+  {t:'14d', dias:7,  cor:'orange'},
+  {t:'30d', dias:23, cor:'purple'},
+  {t:'60d', dias:53, cor:'blue'}
+];
+const MAX_REVS_DIA=2;
+
+// Primeiro dia a partir de `d` com menos de MAX_REVS_DIA revisões pendentes (ignorando `ignorarId`)
+function primeiroDiaLivre(c, d, ignorarId){
+  const cnt={};
+  c.revs.filter(r=>r.s==='p' && r.id!==ignorarId).forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+  for(let i=0;i<365;i++){
+    if((cnt[fmtDMY(d)]||0)<MAX_REVS_DIA) return d;
+    d=addDias(d,1);
+  }
+  return d;
+}
+
+// Garante que cada revisão de um mesmo estudo (7d → 14d → 30d → 60d) caia depois da anterior,
+// mantendo o intervalo entre elas. Corrige casos em que o limite de 2/dia ou uma edição de data
+// jogou duas revisões no mesmo dia. Retorna true se mudou alguma data.
+function ajustarSequenciaRevs(c, di){
+  const ordem = t => INTERVALOS_REV.findIndex(x=>x.t===t);
+  const revs = c.revs.filter(r=>r.di===di && ordem(r.t)>=0).sort((a,b)=>ordem(a.t)-ordem(b.t));
+  let mudou=false;
+  for(let i=1;i<revs.length;i++){
+    const ant=revs[i-1], r=revs[i];
+    if(r.s!=='p') continue;
+    const gap = INTERVALOS_REV[ordem(r.t)].dias - INTERVALOS_REV[ordem(ant.t)].dias;
+    const minimo = addDias(parseDMY(ant.dr), gap);
+    if(parseDMY(r.dr) < minimo){
+      r.dr = fmtDMY(primeiroDiaLivre(c, minimo, r.id));
+      mudou=true;
+    }
+  }
+  return mudou;
+}
+
+function ajustarTodasSequencias(){
+  let mudou=false;
+  (e.cronogramas||[]).forEach(c=>{
+    [...new Set((c.revs||[]).map(r=>r.di))].forEach(di=>{ if(ajustarSequenciaRevs(c,di)) mudou=true; });
+  });
+  return mudou;
+}
+
 // Gera as 4 revisões respeitando máx 2/dia, a partir da data escolhida pelo usuário
 function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas=''){
   const c = currentC();
-  const intervalos=[
-    {t:'7d',  dias:0,  cor:'amber'},
-    {t:'14d', dias:7,  cor:'orange'},
-    {t:'30d', dias:23, cor:'purple'},
-    {t:'60d', dias:53, cor:'blue'}
-  ];
   const cnt={};
   c.revs.filter(r=>r.s==='p').forEach(r=>{cnt[r.dr]=(cnt[r.dr]||0)+1;});
+  let anterior=null; // {data, dias} da revisão anterior desta sequência
 
-  intervalos.forEach(({t,dias,cor})=>{
+  INTERVALOS_REV.forEach(({t,dias,cor})=>{
     let d=addDias(data1,dias);
+    // se a anterior foi empurrada pelo limite diário, empurra esta também (mantém o intervalo)
+    if(anterior){
+      const minimo=addDias(anterior.data, dias-anterior.dias);
+      if(d<minimo) d=minimo;
+    }
     for(let i=0;i<365;i++){
       const k=fmtDMY(d);
       if((cnt[k]||0)<2){
@@ -636,6 +686,7 @@ function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas=''){
           id:`${dsId}-${t}-${Math.random().toString(36).substr(2,4)}`,
           di:dsId,ma,i:de,f:ate,q:qtd,titulo:notas,dr:k,t,s:'p',cor
         });
+        anterior={data:d,dias};
         break;
       }
       d=addDias(d,1);
@@ -723,7 +774,10 @@ function editData(id){
   if(!r) return;
   const novaData=prompt('📅 Nova data da revisão (dd/mm/aaaa):',r.dr);
   if(novaData&&/^\d{2}\/\d{2}\/\d{4}$/.test(novaData)){
-    r.dr=novaData;sv();rend();ntf('📅 Data atualizada!');
+    r.dr=novaData;
+    const empurrou = ajustarSequenciaRevs(c, r.di);
+    sv();rend();
+    ntf(empurrou?'📅 Data atualizada! As revisões seguintes foram ajustadas.':'📅 Data atualizada!');
   }else if(novaData){
     ntf('❌ Formato inválido! Use dd/mm/aaaa','er');
   }
