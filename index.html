@@ -866,6 +866,7 @@ function analisarErro(ma){
 
   document.getElementById('ia-fechar').onclick = () => {
     document.getElementById('modal-root').innerHTML = '';
+    rend();
   };
 
   document.getElementById('ia-analisar').onclick = async () => {
@@ -918,6 +919,122 @@ function analisarErro(ma){
   };
 }
 
+// ===== ABA ANÁLISES: questões analisadas pela IA, para revisar =====
+function analisesPendentes(c){
+  return (c.analises||[]).filter(a=>!a.revisada).length;
+}
+
+function renderAnalises(c){
+  const todas = c.analises||[];
+  const materias = [...new Set([...c.cron.map(x=>x.ma), ...todas.map(a=>a.ma)])];
+  const sel = materias.includes(e.analiseMateria) ? e.analiseMateria : '';
+  const filtro = e.analiseFiltro || 'pendentes';
+  const daMateria = todas.filter(a=>!sel || a.ma===sel);
+  const nPend = daMateria.filter(a=>!a.revisada).length;
+  const nRev = daMateria.length - nPend;
+  const lista = daMateria
+    .filter(a=> filtro==='todas' || (filtro==='revisadas' ? a.revisada : !a.revisada))
+    .sort((a,b)=>b.id-a.id);
+
+  const cont = {};
+  daMateria.forEach(a=>{ cont[a.assunto]=(cont[a.assunto]||0)+1; });
+  const ranking = Object.entries(cont).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  const btnFiltro = (val,rotulo,n) => `<button onclick="setAnaliseFiltro('${val}')" class="px-4 py-2 rounded-lg text-sm font-bold ${filtro===val?'bg-purple-600 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${rotulo} (${n})</button>`;
+
+  return `
+<h2 class="text-2xl font-bold mb-2">🧠 Análise de Questões — ${c.nome}</h2>
+<p class="text-gray-500 text-sm mb-6">Questões erradas analisadas pela IA. Revise cada uma e marque como revisada.</p>
+
+<div class="flex flex-wrap items-end gap-3 mb-6">
+  <div class="flex-1 min-w-[220px]">
+    <label class="block text-sm font-semibold text-gray-700 mb-1">Matéria</label>
+    <select onchange="setAnaliseMateria(this.value)" class="w-full border-2 border-gray-300 rounded-lg p-2 focus:border-purple-500 focus:outline-none">
+      <option value="">Todas as matérias</option>
+      ${materias.map(m=>{
+        const p = todas.filter(a=>a.ma===m && !a.revisada).length;
+        return `<option value="${escHtml(m)}" ${m===sel?'selected':''}>${escHtml(m)}${p?` (${p} pendentes)`:''}</option>`;
+      }).join('')}
+    </select>
+  </div>
+  ${sel?`<button onclick="analisarErro(this.dataset.ma)" data-ma="${escHtml(sel)}" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold">🤖 Analisar nova questão</button>`:''}
+</div>
+
+${ranking.length?`
+<div class="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-6">
+  <p class="text-sm font-bold text-purple-900 mb-2">📌 Assuntos que você mais erra${sel?'':' (todas as matérias)'}</p>
+  <ul class="text-sm space-y-1">
+    ${ranking.map(([assunto,n])=>`<li class="flex justify-between gap-2"><span class="text-gray-700">${escHtml(assunto)}</span><span class="font-bold text-red-600 flex-shrink-0">${n}×</span></li>`).join('')}
+  </ul>
+</div>`:''}
+
+<div class="flex flex-wrap gap-2 mb-4">
+  ${btnFiltro('pendentes','⏳ Para revisar',nPend)}
+  ${btnFiltro('revisadas','✅ Revisadas',nRev)}
+  ${btnFiltro('todas','Todas',daMateria.length)}
+</div>
+
+${lista.length===0?`<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">${
+  daMateria.length===0
+    ? 'Nenhuma questão analisada ainda. Use o botão 🤖 Analisar erro'+(sel?' acima':' na aba Questões')+'.'
+    : filtro==='pendentes' ? '🎉 Nenhuma questão pendente de revisão!' : 'Nenhuma questão aqui.'
+}</p>`:`
+<div class="space-y-3">
+${lista.map(a=>`
+  <details class="border-l-4 ${a.revisada?'border-green-400 bg-green-50':'border-purple-400 bg-white'} rounded-lg p-4 shadow-sm">
+    <summary class="cursor-pointer list-none">
+      <div class="flex justify-between items-start gap-3">
+        <div class="min-w-0">
+          ${sel?'':`<p class="text-xs font-bold text-purple-600 mb-1">${escHtml(a.ma)}</p>`}
+          <p class="font-bold text-gray-800">${escHtml(a.assunto)}</p>
+          <p class="text-sm text-gray-500 mt-1 line-clamp-2">${escHtml(a.questao)}</p>
+          <span class="text-xs text-purple-600 font-semibold">Ver análise ▾</span>
+        </div>
+        <div class="text-right flex-shrink-0">
+          <p class="text-xs text-gray-400">${a.data}</p>
+          ${a.revisada?`<p class="text-xs text-green-700 font-bold mt-1">✅ Revisada${a.revisadaEm?' em '+a.revisadaEm:''}</p>`:''}
+        </div>
+      </div>
+    </summary>
+    <div class="mt-3 space-y-2 border-t pt-3 text-sm">
+      <p><span class="font-bold text-red-600">❌ Por que errou:</span> ${escHtml(a.motivo_erro)}</p>
+      <div><span class="font-bold text-green-700">📚 Revisar:</span>
+        <ul class="list-disc ml-5 mt-1">${(a.revisar||[]).map(t=>`<li>${escHtml(t)}</li>`).join('')}</ul>
+      </div>
+      <p class="text-gray-600 whitespace-pre-wrap bg-gray-50 rounded-lg p-3"><span class="font-bold">Questão:</span> ${escHtml(a.questao)}</p>
+    </div>
+    <div class="flex gap-2 mt-3">
+      <button onclick="toggleRevisada(${a.id})" class="${a.revisada?'bg-white border-2 border-gray-300 text-gray-600 hover:bg-gray-50':'bg-green-600 hover:bg-green-700 text-white'} px-4 py-2 rounded-lg text-sm font-bold">${a.revisada?'↩️ Marcar como não revisada':'✅ Marcar como revisada'}</button>
+      <button onclick="delAnalise(${a.id})" class="text-red-500 hover:text-red-700 text-sm font-bold px-2">🗑️</button>
+    </div>
+  </details>`).join('')}
+</div>`}`;
+}
+
+function setAnaliseMateria(ma){
+  e.analiseMateria = ma;
+  rend();
+}
+
+function setAnaliseFiltro(f){
+  e.analiseFiltro = f;
+  rend();
+}
+
+function toggleRevisada(id){
+  const a = (currentC().analises||[]).find(x=>x.id===id);
+  if(!a) return;
+  a.revisada = !a.revisada;
+  if(a.revisada){
+    const h = new Date();
+    a.revisadaEm = String(h.getDate()).padStart(2,'0')+'/'+String(h.getMonth()+1).padStart(2,'0')+'/'+h.getFullYear();
+    ntf('✅ Questão marcada como revisada');
+  } else {
+    delete a.revisadaEm;
+  }
+  sv();rend();
+}
+
 function delAnalise(id, ma){
   if(!confirm('Remover esta análise?')) return;
   const c = currentC();
@@ -925,6 +1042,7 @@ function delAnalise(id, ma){
   sv();
   const h = document.getElementById('ia-historico');
   if(h) h.innerHTML = analisesHtml(ma);
+  else rend();
 }
 
 function delQuestao(id){
@@ -1473,6 +1591,7 @@ function rend(){
 <button onclick="e.aba='rotina';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='rotina'?'tab-active':'text-gray-600 hover:text-gray-800'}">📆 Rotina Semanal</button>
 <button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
 <button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
+<button onclick="e.aba='analises';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='analises'?'tab-active':'text-gray-600 hover:text-gray-800'}">🧠 Análises${analisesPendentes(c)>0?`<span class="absolute top-2 right-2 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">${analisesPendentes(c)}</span>`:''}</button>
 <button onclick="e.aba='foco';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='foco'?'tab-active':'text-gray-600 hover:text-gray-800'}">🍅 Foco (PD)</button>
 </div>
 </div>
@@ -1758,6 +1877,8 @@ ${c.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
 </details>`:'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhuma questão registrada ainda.</p>'}
 `:''}
 
+${e.aba==='analises'?renderAnalises(c):''}
+
 ${e.aba==='foco'?`
 <h2 class="text-2xl font-bold mb-2">🍅 Foco — ${c.nome}</h2>
 <p class="text-gray-500 text-sm mb-6">Cada PD (Pomodoro de Estudo) dura 25 minutos. Ao terminar, você escolhe entre continuar estudando a mesma matéria (contando os minutos extras) ou já iniciar a pausa de 5 minutos. Um alarme soa no PC ao final de cada etapa.</p>
@@ -1839,6 +1960,9 @@ ${svgChartPomodoros(14)}
   window.delQuestao = delQuestao;
   window.analisarErro = analisarErro;
   window.delAnalise = delAnalise;
+  window.setAnaliseMateria = setAnaliseMateria;
+  window.setAnaliseFiltro = setAnaliseFiltro;
+  window.toggleRevisada = toggleRevisada;
   window.pomoToggle = pomoToggle;
   window.pomoReset = pomoReset;
   window.pomoPularPausa = pomoPularPausa;
