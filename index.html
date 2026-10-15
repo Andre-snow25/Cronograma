@@ -396,14 +396,8 @@ function agruparPorData(lista){
   return grupos;
 }
 
-function gerarAgenda(){
-  const c = currentC();
-  const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
-  if(pendentes.length===0){ntf('❌ Não há aulas pendentes neste cronograma para gerar agenda','er');return;}
-  const inputEl = document.getElementById('agenda-data-inicio');
-  const dataInicio = (inputEl && inputEl.value) || hojeISO();
-  if(c.agenda && !confirm('Já existe uma agenda gerada para este cronograma. Gerar de novo vai substituí-la (o progresso marcado será perdido). Continuar?')) return;
-
+// Monta os dias da agenda (2 matérias/dia) a partir de `inicio`, com as aulas ainda não concluídas.
+function montarDiasAgenda(pendentes, inicio){
   // Sequência mesclada por peso (Smooth Weighted Round-Robin, o mesmo método
   // usado em balanceadores de carga): a cada escolha, toda matéria pendente
   // acumula seu peso (aulas restantes) e a de maior saldo acumulado é
@@ -432,15 +426,55 @@ function gerarAgenda(){
 
   const dias=[];
   for(let i=0;i<sequencia.length;i+=2){
-    const date = addDiasISO(dataInicio, dias.length);
+    const date = addDiasISO(inicio, dias.length);
     dias.push({date, materias: sequencia.slice(i, i+2)});
   }
+  return dias;
+}
 
+function gerarAgenda(){
+  const c = currentC();
+  const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
+  if(pendentes.length===0){ntf('❌ Não há aulas pendentes neste cronograma para gerar agenda','er');return;}
+  const inputEl = document.getElementById('agenda-data-inicio');
+  const dataInicio = (inputEl && inputEl.value) || hojeISO();
+  if(c.agenda && !confirm('Já existe uma agenda gerada para este cronograma. Gerar de novo vai substituí-la (o progresso marcado será perdido). Continuar?\n\nDica: use "Atualizar agenda" para manter o que já foi marcado.')) return;
+
+  const dias = montarDiasAgenda(pendentes, dataInicio);
   c.agenda = {dataInicio, dias};
   c.agendaConcluidos = {};
   agendaSemanaOffset = offsetDaSemanaDeData(dataInicio);
   sv();rend();
   ntf('🗓️ Agenda mesclada gerada!');
+}
+
+// Atualiza a agenda existente sem perder o progresso: mantém os dias passados (e hoje, se já
+// tiver algo marcado) e refaz daí pra frente com as aulas que faltam — incluindo matérias novas.
+function atualizarAgenda(){
+  const c = currentC();
+  if(!c.agenda){ gerarAgenda(); return; }
+  const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
+  const hoje = hojeISO();
+  const temMarcado = dia => dia.materias.some(m=>c.agendaConcluidos[dia.date+'|'+m.id]);
+
+  const mantidos = c.agenda.dias.filter(dia => dia.date < hoje || (dia.date===hoje && temMarcado(dia)));
+  const inicio = mantidos.some(dia=>dia.date===hoje) ? addDiasISO(hoje,1) : hoje;
+  const novos = pendentes.length ? montarDiasAgenda(pendentes, inicio) : [];
+
+  // Guarda só as marcações dos dias mantidos
+  const concluidos = {};
+  mantidos.forEach(dia=>dia.materias.forEach(m=>{
+    const key = dia.date+'|'+m.id;
+    if(c.agendaConcluidos[key]) concluidos[key] = true;
+  }));
+
+  c.agenda = {dataInicio: c.agenda.dataInicio, dias: [...mantidos, ...novos]};
+  c.agendaConcluidos = concluidos;
+  agendaSemanaOffset = 0;
+  sv();rend();
+  ntf(novos.length
+    ? `🔄 Agenda atualizada! ${novos.length} dias a partir de ${fmtDMY(new Date(inicio+'T00:00:00'))}, progresso mantido.`
+    : '🎉 Todas as aulas já foram concluídas!');
 }
 
 // ===== ROTINA SEMANAL =====
@@ -1727,8 +1761,10 @@ ${e.aba==='agenda'?`
       <label class="block text-xs font-bold text-gray-500 mb-1">Data de início</label>
       <input id="agenda-data-inicio" type="date" value="${c.agenda ? c.agenda.dataInicio : hojeISO()}" class="border-2 border-gray-300 rounded-lg p-2 focus:border-indigo-500 focus:outline-none">
     </div>
-    <button onclick="gerarAgenda()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold">🗓️ Gerar agenda mesclada</button>
+    <button onclick="gerarAgenda()" class="${c.agenda?'bg-white border-2 border-indigo-300 text-indigo-700 hover:bg-indigo-50':'bg-indigo-600 hover:bg-indigo-700 text-white'} px-5 py-2.5 rounded-lg font-bold">🗓️ ${c.agenda?'Gerar do zero':'Gerar agenda mesclada'}</button>
+    ${c.agenda?`<button onclick="atualizarAgenda()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold">🔄 Atualizar agenda</button>`:''}
   </div>
+  ${c.agenda?'<p class="text-xs text-gray-500 mt-3"><b>Atualizar agenda</b> mantém os dias passados e o que você já marcou, e refaz a partir de hoje com as aulas que faltam (inclusive matérias novas).</p>':''}
 </div>
 
 ${!c.agenda ? `<p class="text-gray-400 text-center py-12 bg-gray-50 rounded-lg">Nenhuma agenda gerada ainda. Cadastre matérias no Plano e clique em "Gerar agenda mesclada".</p>` : (()=>{
@@ -1994,6 +2030,7 @@ ${svgChartPomodoros(14)}
   window.addMateria = addMateria;
   window.delMateria = delMateria;
   window.gerarAgenda = gerarAgenda;
+  window.atualizarAgenda = atualizarAgenda;
   window.mudarSemanaAgenda = mudarSemanaAgenda;
   window.irParaSemanaAtualAgenda = irParaSemanaAtualAgenda;
   window.irParaSemanaDaData = irParaSemanaDaData;
