@@ -1469,9 +1469,13 @@ function pomoReset(){
 
 function pomodorosPorDia(n=14){
   const dias=diasAtras(n);
-  const mapa={};
-  currentC().pomodoros.forEach(p=>{mapa[p.data]=(mapa[p.data]||0)+1;});
-  return dias.map(d=>({data:d,qtd:mapa[d]||0}));
+  const mapa={}, extras={};
+  currentC().pomodoros.forEach(p=>{
+    mapa[p.data]=(mapa[p.data]||0)+1;
+    // minutos estudados além dos 25 do PD ("Continuar estudando")
+    extras[p.data]=(extras[p.data]||0)+Math.max(0,(p.min||25)-POMO_DURACAO/60);
+  });
+  return dias.map(d=>({data:d,qtd:mapa[d]||0,extra:extras[d]?`+${extras[d]}min`:''}));
 }
 function pomodorosHoje(){
   const hj=fmtDMY(new Date());
@@ -1492,7 +1496,8 @@ function minutosSemana(){
 // Gráfico de barras (SVG) genérico
 function svgBarChart(dados, color){
   const max=Math.max(...dados.map(d=>d.qtd),1);
-  const w=760,h=190,padB=34,padT=20,padL=10,padR=10;
+  const temExtra=dados.some(d=>d.extra);
+  const w=760,h=190,padB=34,padT=temExtra?32:20,padL=10,padR=10;
   const areaW=w-padL-padR;
   const bw=areaW/dados.length;
   const bars=dados.map((d,i)=>{
@@ -1503,6 +1508,7 @@ function svgBarChart(dados, color){
     const [dd,mm]=d.data.split('/');
     return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bwReal.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="${color}"/>
     ${d.qtd>0?`<text x="${(x+bwReal/2).toFixed(1)}" y="${(y-4).toFixed(1)}" font-size="10" text-anchor="middle" fill="#374151" font-weight="bold">${d.qtd}</text>`:''}
+    ${d.extra?`<text x="${(x+bwReal/2).toFixed(1)}" y="${(y-16).toFixed(1)}" font-size="9" text-anchor="middle" fill="#c2410c" font-weight="bold">${d.extra}</text>`:''}
     <text x="${(x+bwReal/2).toFixed(1)}" y="${h-padB+14}" font-size="9" text-anchor="middle" fill="#6b7280">${dd}/${mm}</text>`;
   }).join('');
   return `<svg viewBox="0 0 ${w} ${h}" class="w-full">
