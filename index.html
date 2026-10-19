@@ -316,14 +316,18 @@ function trocarCronograma(id){
 function addMateria(){
   const nomeEl = document.getElementById('nova-materia-nome');
   const aulasEl = document.getElementById('nova-materia-aulas');
+  const extraEl = document.getElementById('nova-materia-extra');
   const nome = nomeEl.value.trim();
   const aulas = parseInt(aulasEl.value)||0;
+  const extra = !!(extraEl && extraEl.checked);
   if(!nome || aulas<=0){ntf('❌ Informe o nome da matéria e a quantidade de aulas','er');return;}
   const c = currentC();
-  c.cron.push({id:'m'+Date.now()+Math.random().toString(36).substr(2,4), ma:nome, aulasTotal:aulas, aulasConcluidas:0, concluido:false});
+  const m = {id:'m'+Date.now()+Math.random().toString(36).substr(2,4), ma:nome, aulasTotal:aulas, aulasConcluidas:0, concluido:false};
+  if(extra) m.extra = true;
+  c.cron.push(m);
   nomeEl.value=''; aulasEl.value='';
   sv();rend();
-  ntf(`✅ ${nome} adicionada ao ${c.nome}!`);
+  ntf(extra ? `⭐ ${nome} adicionada como extra! Use "Atualizar agenda" para incluí-la na agenda.` : `✅ ${nome} adicionada ao ${c.nome}!`);
 }
 function delMateria(id){
   const c = currentC();
@@ -432,6 +436,22 @@ function montarDiasAgenda(pendentes, inicio){
   return dias;
 }
 
+// Matérias extras (ex.: as que faltam de outro edital): ficam fora do progresso do plano
+// e entram na agenda à parte, 1 por dia, para estudar depois das matérias do dia.
+function montarAgendaCompleta(c, inicio){
+  const restantes = m => (m.aulasTotal-m.aulasConcluidas)>0;
+  const dias = montarDiasAgenda(c.cron.filter(m=>!m.extra && restantes(m)), inicio);
+  dias.forEach(dia=>{ dia.extras=[]; });
+  const seqExtras = montarDiasAgenda(c.cron.filter(m=>m.extra && restantes(m)), inicio)
+    .flatMap(dia=>dia.materias);
+  seqExtras.forEach((m,i)=>{
+    if(!dias[i]) dias[i] = {date:addDiasISO(inicio,i), materias:[], extras:[]};
+    dias[i].extras.push(m);
+  });
+  return dias;
+}
+function itensDoDia(dia){ return [...dia.materias, ...(dia.extras||[])]; }
+
 function gerarAgenda(){
   const c = currentC();
   const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
@@ -440,7 +460,7 @@ function gerarAgenda(){
   const dataInicio = (inputEl && inputEl.value) || hojeISO();
   if(c.agenda && !confirm('Já existe uma agenda gerada para este cronograma. Gerar de novo vai substituí-la (o progresso marcado será perdido). Continuar?\n\nDica: use "Atualizar agenda" para manter o que já foi marcado.')) return;
 
-  const dias = montarDiasAgenda(pendentes, dataInicio);
+  const dias = montarAgendaCompleta(c, dataInicio);
   c.agenda = {dataInicio, dias};
   c.agendaConcluidos = {};
   agendaSemanaOffset = offsetDaSemanaDeData(dataInicio);
@@ -455,15 +475,15 @@ function atualizarAgenda(){
   if(!c.agenda){ gerarAgenda(); return; }
   const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
   const hoje = hojeISO();
-  const temMarcado = dia => dia.materias.some(m=>c.agendaConcluidos[dia.date+'|'+m.id]);
+  const temMarcado = dia => itensDoDia(dia).some(m=>c.agendaConcluidos[dia.date+'|'+m.id]);
 
   const mantidos = c.agenda.dias.filter(dia => dia.date < hoje || (dia.date===hoje && temMarcado(dia)));
   const inicio = mantidos.some(dia=>dia.date===hoje) ? addDiasISO(hoje,1) : hoje;
-  const novos = pendentes.length ? montarDiasAgenda(pendentes, inicio) : [];
+  const novos = pendentes.length ? montarAgendaCompleta(c, inicio) : [];
 
   // Guarda só as marcações dos dias mantidos
   const concluidos = {};
-  mantidos.forEach(dia=>dia.materias.forEach(m=>{
+  mantidos.forEach(dia=>itensDoDia(dia).forEach(m=>{
     const key = dia.date+'|'+m.id;
     if(c.agendaConcluidos[key]) concluidos[key] = true;
   }));
@@ -629,7 +649,7 @@ ${semana.map(d=>`<th class="${d.label===hojeLabel?'bg-indigo-100 text-indigo-800
 <td class="bg-orange-50 border border-gray-300 p-2 font-bold text-xs text-orange-700 sticky left-0">🔄 Revisões</td>
 ${semana.map(d=>`
 <td class="border border-gray-300 p-2 align-top ${d.revs.length>0?'bg-orange-50':''}">
-  ${d.revs.length===0?'<span class="text-gray-300 text-xs">—</span>':d.revs.map(r=>`<div class="text-xs font-bold text-orange-800 mb-1">${r.ma}</div>`).join('')}
+  ${d.revs.length===0?'<span class="text-gray-300 text-xs">—</span>':d.revs.map(r=>`<div class="text-xs font-bold ${r.extra?'text-fuchsia-700':'text-orange-800'} mb-1">${r.extra?'⭐ ':''}${r.ma}</div>`).join('')}
 </td>`).join('')}
 </tr>
 <tr>
@@ -702,13 +722,15 @@ function ajustarTodasSequencias(){
 }
 
 // Gera as 4 revisões a partir da data escolhida pelo usuário (sem limite por dia)
-function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas=''){
+function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas='', extra=false){
   const c = currentC();
   INTERVALOS_REV.forEach(({t,dias,cor})=>{
-    c.revs.push({
+    const r = {
       id:`${dsId}-${t}-${Math.random().toString(36).substr(2,4)}`,
       di:dsId,ma,i:de,f:ate,q:qtd,titulo:notas,dr:fmtDMY(addDias(data1,dias)),t,s:'p',cor
-    });
+    };
+    if(extra) r.extra = true;
+    c.revs.push(r);
   });
 }
 
@@ -767,12 +789,12 @@ function registrarAulas(id, agendaKey){
     const ate = item.aulasConcluidas+real;
     item.aulasConcluidas += real;
     if(item.aulasConcluidas>=item.aulasTotal) item.concluido=true;
-    c.stats.a += real;
+    if(!item.extra) c.stats.a += real; // extras não contam no progresso do plano
     c.stats.d++;
     const notas = document.getElementById('m-notas').value.trim();
     const ds={id:Date.now(),dt:new Date().toLocaleDateString('pt-BR'),ma:item.ma,i:de,f:ate,q:real,titulo:notas};
     c.dias.push(ds);
-    gerarRevisoes(ds.id, item.ma, de, ate, real, data1, notas);
+    gerarRevisoes(ds.id, item.ma, de, ate, real, data1, notas, !!item.extra);
     if(agendaKey) c.agendaConcluidos[agendaKey] = true;
     document.getElementById('modal-root').innerHTML = '';
     sv();rend();
@@ -1629,11 +1651,13 @@ window.authEsqueci = authEsqueci;
 function rend(){
   const c = currentC();
   const pd=c.revs.filter(x=>x.s==='p').length;
-  const ta=c.cron.reduce((s,m)=>s+m.aulasTotal,0);
+  const doPlano = c.cron.filter(x=>!x.extra);
+  const extras = c.cron.filter(x=>x.extra);
+  const ta=doPlano.reduce((s,m)=>s+m.aulasTotal,0);
   const pg= ta>0 ? (c.stats.a/ta*100).toFixed(1) : '0.0';
 
-  const pendentes = c.cron.filter(x=>!x.concluido);
-  const concluidas = c.cron.filter(x=>x.concluido);
+  const pendentes = doPlano.filter(x=>!x.concluido);
+  const concluidas = doPlano.filter(x=>x.concluido);
 
   document.getElementById('app').innerHTML=`
 <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
@@ -1661,7 +1685,7 @@ function rend(){
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
 <div class="bg-gradient-to-br from-indigo-100 to-indigo-200 p-4 rounded-xl"><p class="text-sm font-bold text-indigo-900 mb-1">📚 Aulas</p><p class="text-3xl font-bold text-indigo-700">${c.stats.a}</p><p class="text-xs text-indigo-600">de ${ta}</p></div>
-<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">📖 Matérias</p><p class="text-3xl font-bold text-green-700">${concluidas.length}</p><p class="text-xs text-green-600">de ${c.cron.length} concluídas</p></div>
+<div class="bg-gradient-to-br from-green-100 to-green-200 p-4 rounded-xl"><p class="text-sm font-bold text-green-900 mb-1">📖 Matérias</p><p class="text-3xl font-bold text-green-700">${concluidas.length}</p><p class="text-xs text-green-600">de ${doPlano.length} concluídas</p></div>
 <div class="bg-gradient-to-br from-purple-100 to-purple-200 p-4 rounded-xl"><p class="text-sm font-bold text-purple-900 mb-1">📊 Progresso</p><p class="text-3xl font-bold text-purple-700">${pg}%</p></div>
 <div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">🔔 Revisões</p><p class="text-3xl font-bold text-orange-700">${pd}</p><p class="text-xs text-orange-600">${c.stats.r} completas</p></div>
 </div>
@@ -1697,6 +1721,10 @@ ${e.aba==='plano'?`
     </div>
     <button onclick="addMateria()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold">Adicionar</button>
   </div>
+  <label class="flex items-center gap-2 mt-3 text-sm text-gray-600 cursor-pointer select-none">
+    <input id="nova-materia-extra" type="checkbox" class="w-4 h-4 accent-fuchsia-600">
+    <span>⭐ <b>Matéria extra</b> — estudo após as matérias do dia; não conta na porcentagem do plano</span>
+  </label>
 </div>
 
 <div class="mb-10">
@@ -1727,6 +1755,37 @@ ${pendentes.map(item=>{
 }).join('')}
 </div>`}
 </div>
+
+${extras.length>0?`
+<div class="mb-10">
+<h3 class="text-xl font-bold text-fuchsia-700 mb-1">⭐ Extras (${extras.filter(x=>!x.concluido).length} pendentes)</h3>
+<p class="text-xs text-gray-500 mb-4">Para estudar depois das matérias do dia. Não entram na porcentagem do plano.</p>
+<div class="grid md:grid-cols-2 gap-3">
+${extras.map(item=>{
+  const pct = Math.round(item.aulasConcluidas/item.aulasTotal*100);
+  return `<div class="border-2 border-fuchsia-300 ${item.concluido?'bg-green-50 opacity-70':'bg-fuchsia-50'} rounded-xl p-4 hover:shadow-lg transition-all">
+  <div class="flex justify-between items-start gap-3 mb-3">
+    <div class="flex-1 min-w-0">
+      <h4 class="font-bold text-gray-800 break-words mb-1 ${item.concluido?'line-through':''}">⭐ ${item.ma}</h4>
+      <div class="flex gap-2 text-xs flex-wrap">
+        <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">📚 ${item.aulasTotal} aulas</span>
+        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${item.aulasConcluidas} feitas</span>
+        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${item.aulasTotal-item.aulasConcluidas} restantes</span>
+      </div>
+    </div>
+    <div class="flex flex-col gap-1 flex-shrink-0">
+      ${item.concluido?'<span class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-bold">✓ Feito</span>':`<button onclick="registrarAulas('${item.id}')" class="bg-fuchsia-600 hover:bg-fuchsia-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap shadow-md">+ Estudei</button>`}
+      <button onclick="delMateria('${item.id}')" class="text-red-500 hover:text-red-700 text-xs font-bold">remover</button>
+    </div>
+  </div>
+  <div class="w-full bg-gray-200 rounded-full h-2">
+    <div class="bg-fuchsia-500 h-2 rounded-full transition-all" style="width:${pct}%"></div>
+  </div>
+  <p class="text-xs text-gray-400 mt-1">${pct}% concluído</p>
+</div>`;
+}).join('')}
+</div>
+</div>`:''}
 
 ${concluidas.length>0?`
 <details>
@@ -1792,6 +1851,14 @@ ${diasSemana.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rou
     return `<button onclick="registrarAulas('${m.id}','${key}')" class="text-sm px-3 py-2 rounded-lg font-bold border-2 ${done?'bg-green-100 border-green-300 text-green-700 line-through':'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'}">${done?'✓ ':''}${m.ma}</button>`;
   }).join('')}
   </div>
+  ${(dia.extras||[]).length?`<div class="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-dashed border-fuchsia-200">
+    <span class="text-xs font-bold text-fuchsia-700">⭐ Extra (depois do plano):</span>
+    ${dia.extras.map(m=>{
+      const key = dia.date+'|'+m.id;
+      const done = !!c.agendaConcluidos[key];
+      return `<button onclick="registrarAulas('${m.id}','${key}')" class="text-sm px-3 py-2 rounded-lg font-bold border-2 ${done?'bg-green-100 border-green-300 text-green-700 line-through':'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-100'}">${done?'✓ ':''}${m.ma}</button>`;
+    }).join('')}
+  </div>`:''}
 </div>`;
 }).join('')}
 </div>
@@ -1844,6 +1911,7 @@ ${grupo.itens.map((r,i)=>`  <div class="${i>0?'border-t border-gray-100 pt-4':''
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 mb-2">
           <h4 class="font-bold text-lg break-words">${r.ma}</h4>
+          ${r.extra?'<span class="bg-fuchsia-100 text-fuchsia-700 text-xs font-bold px-2 py-0.5 rounded-full">⭐ extra</span>':''}
           <button onclick="editData('${r.id}')" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 rounded" title="Editar data">✏️</button>
         </div>
         <div class="flex gap-2 flex-wrap text-xs mb-3">
@@ -1871,6 +1939,7 @@ ${grupo.itens.map(r=>`  <div>
     <div class="flex gap-2 text-xs mt-1">
       <span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span>
       <span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span>
+      ${r.extra?'<span class="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded font-bold">⭐ extra</span>':''}
     </div>
   </div>`).join('')}
   </div>
