@@ -452,6 +452,56 @@ function montarAgendaCompleta(c, inicio){
 }
 function itensDoDia(dia){ return [...dia.materias, ...(dia.extras||[])]; }
 
+// Aulas da agenda não marcadas em dias que já passaram vão para hoje, e o que estava
+// em hoje/dias seguintes é empurrado em cascata (2 do plano e 1 extra por dia).
+// O que já foi marcado fica onde está. Retorna true se mudou algo.
+function rolarAgendaAtrasada(c){
+  if(!c.agenda || !c.agenda.dias.length) return false;
+  const hoje = hojeISO();
+  const feito = (dia,m) => !!c.agendaConcluidos[dia.date+'|'+m.id];
+  const dias = [...c.agenda.dias].sort((a,b)=>a.date.localeCompare(b.date));
+  const atrasado = dias.some(dia=>dia.date<hoje && itensDoDia(dia).some(m=>!feito(dia,m)));
+  if(!atrasado) return false;
+
+  const novosConcluidos = {};
+  const porData = {};
+  const resultado = [];
+  const pegarDia = date => {
+    if(!porData[date]){ porData[date]={date, materias:[], extras:[]}; resultado.push(porData[date]); }
+    return porData[date];
+  };
+  const filas = {materias:[], extras:[]};
+  dias.forEach(dia=>{
+    ['materias','extras'].forEach(campo=>{
+      (dia[campo]||[]).forEach(m=>{
+        if(feito(dia,m)){
+          pegarDia(dia.date)[campo].push(m);
+          novosConcluidos[dia.date+'|'+m.id] = true;
+        } else if(dia.date<hoje){
+          filas[campo].push(m);
+        }
+      });
+    });
+  });
+  // fila = atrasadas (na ordem) + o que estava de hoje em diante (na ordem)
+  dias.filter(dia=>dia.date>=hoje).forEach(dia=>{
+    ['materias','extras'].forEach(campo=>{
+      (dia[campo]||[]).forEach(m=>{ if(!feito(dia,m)) filas[campo].push(m); });
+    });
+  });
+  const capacidade = {materias:2, extras:1};
+  ['materias','extras'].forEach(campo=>{
+    let date = hoje;
+    filas[campo].forEach(m=>{
+      while(pegarDia(date)[campo].length>=capacidade[campo]) date = addDiasISO(date,1);
+      porData[date][campo].push(m);
+    });
+  });
+  c.agenda.dias = resultado.filter(dia=>itensDoDia(dia).length).sort((a,b)=>a.date.localeCompare(b.date));
+  c.agendaConcluidos = novosConcluidos;
+  return true;
+}
+
 function gerarAgenda(){
   const c = currentC();
   const pendentes = c.cron.filter(m=>(m.aulasTotal-m.aulasConcluidas)>0);
@@ -1649,6 +1699,10 @@ window.authGoogle = authGoogle;
 window.authEsqueci = authEsqueci;
 
 function rend(){
+  // Ao abrir o app ou virar o dia: revisões e aulas da agenda atrasadas vão para hoje
+  let ajustou = ajustarTodasSequencias();
+  (e.cronogramas||[]).forEach(cr=>{ if(rolarAgendaAtrasada(cr)) ajustou = true; });
+  if(ajustou) sv();
   const c = currentC();
   const pd=c.revs.filter(x=>x.s==='p').length;
   const doPlano = c.cron.filter(x=>!x.extra);
