@@ -11,7 +11,7 @@ const MAX_CARACTERES = 6000;
 const client = new Anthropic();
 
 const Analise = z.object({
-  assunto: z.string().describe('Assunto específico dentro da matéria que a questão cobra, do geral ao específico. Ex: "Crimes contra a Administração Pública → Peculato culposo"'),
+  assunto: z.string().describe('Assunto específico dentro da matéria que a questão cobra, do geral ao específico, níveis separados por " → ". O 1º nível é um tema amplo da matéria (agrupa vários erros), o 2º um subtema. Ex: "Crimes contra a Administração Pública → Peculato → Peculato culposo"'),
   motivo_erro: z.string().describe('Por que a alternativa marcada pelo aluno está errada (ou o provável motivo do erro), em 1 a 3 frases'),
   revisar: z.array(z.string()).describe('2 a 4 tópicos curtos e objetivos para revisar'),
 });
@@ -42,6 +42,10 @@ export default async function handler(req, res) {
   }
 
   const { materia = '', questao = '', resposta = '', gabarito = '' } = req.body || {};
+  // Temas (1º nível do assunto) já usados nesta matéria, para a IA reaproveitar o mesmo
+  // nome e o ranking "Temas que você mais erra" agrupar os erros de verdade.
+  const temas = (Array.isArray(req.body?.temas) ? req.body.temas : [])
+    .filter(t => typeof t === 'string' && t.trim()).map(t => t.trim().slice(0, 120)).slice(0, 40);
   if (!questao.trim()) return res.status(400).json({ erro: 'Cole o enunciado da questão.' });
   if ((questao + resposta + gabarito).length > MAX_CARACTERES) {
     return res.status(400).json({ erro: `Questão muito longa (máx. ${MAX_CARACTERES} caracteres).` });
@@ -53,7 +57,10 @@ Questão:
 ${questao}
 
 Alternativa que marquei: ${resposta || '(não informada)'}
-Gabarito: ${gabarito || '(não informado)'}`;
+Gabarito: ${gabarito || '(não informado)'}${temas.length ? `
+
+Temas já usados nesta matéria (1º nível do assunto): ${temas.join(' | ')}
+Se a questão se encaixar em um deles, comece o assunto com exatamente o mesmo nome; só crie um tema novo se nenhum servir.` : ''}`;
 
   try {
     const response = await client.messages.parse({

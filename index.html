@@ -21,6 +21,19 @@ textarea{resize:vertical;min-height:60px}
 <style>
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;}
 .modal-box{background:#fff;border-radius:16px;padding:28px;max-width:400px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3);}
+.md h1{font-size:1.4rem;font-weight:700;margin:1rem 0 .5rem}
+.md h2{font-size:1.2rem;font-weight:700;margin:1rem 0 .5rem;color:#6b21a8}
+.md h3{font-size:1.05rem;font-weight:700;margin:.8rem 0 .4rem}
+.md p{margin:.4rem 0}
+.md ul{list-style:disc;margin:.4rem 0 .4rem 1.4rem}
+.md ol{list-style:decimal;margin:.4rem 0 .4rem 1.4rem}
+.md li{margin:.15rem 0}
+.md table{border-collapse:collapse;margin:.6rem 0;font-size:.9em}
+.md th,.md td{border:1px solid #d1d5db;padding:4px 8px;text-align:left}
+.md th{background:#f3f4f6}
+.md code{background:#f3f4f6;padding:1px 4px;border-radius:4px}
+.md blockquote{border-left:4px solid #c4b5fd;padding-left:.8rem;color:#4b5563;margin:.5rem 0}
+.md hr{margin:1rem 0}
 </style>
 <div id="sync-status" class="fixed top-4 left-4 z-50"></div>
 <div id="app" class="max-w-7xl mx-auto"></div>
@@ -79,7 +92,7 @@ function novoCronogramaObj(nome){
     cron: [], dias: [], revs: [],
     stats: {a:0,d:0,r:0},
     titulos: {}, dataReprogramacao: null,
-    questoes: [], pomodoros: [], analises: [],
+    questoes: [], pomodoros: [], analises: [], materiais: [],
     agenda: null, agendaConcluidos: {},
     rotina: rotinaPadrao()
   };
@@ -144,6 +157,7 @@ function migrar(data){
       if(!c.titulos) c.titulos={};
       if(!c.questoes) c.questoes=[];
       if(!c.analises) c.analises=[];
+      if(!c.materiais) c.materiais=[];
       if(c.dataReprogramacao===undefined) c.dataReprogramacao=null;
       if(c.agenda===undefined) c.agenda=null;
       if(!c.agendaConcluidos) c.agendaConcluidos={};
@@ -938,18 +952,45 @@ function escHtml(s){
   return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 
+// Ranking de erros por matéria → tema → subtema. O assunto vem da IA no formato
+// "Tema → Subtema → Detalhe"; agrupa pelos 2 primeiros níveis para os erros se somarem
+// (com o assunto completo, quase toda questão vira um item "1×" diferente).
+function rankingTemasHtml(lista, mostrarMateria){
+  const ordenar = obj => Object.values(obj).sort((a,b)=>b.n-a.n || a.nome.localeCompare(b.nome));
+  const porMateria = {};
+  lista.forEach(a=>{
+    const partes = String(a.assunto||'Sem assunto').split('→').map(s=>s.trim()).filter(Boolean);
+    const tema = partes[0] || 'Sem assunto';
+    const sub = partes[1] || '(geral)';
+    const m = porMateria[a.ma] ||= {nome:a.ma, n:0, temas:{}};
+    const t = m.temas[tema] ||= {nome:tema, n:0, subs:{}};
+    const s = t.subs[sub] ||= {nome:sub, n:0};
+    m.n++; t.n++; s.n++;
+  });
+  const temasHtml = temas => `<ul class="text-sm space-y-1">${ordenar(temas).map(t=>`
+    <li><details>
+      <summary class="flex justify-between gap-2 cursor-pointer list-none hover:bg-white/60 rounded px-1">
+        <span class="text-gray-800 font-semibold">▸ ${escHtml(t.nome)}</span><span class="font-bold text-red-600 flex-shrink-0">${t.n}×</span>
+      </summary>
+      <ul class="ml-5 mt-1 mb-2 space-y-0.5">${ordenar(t.subs).map(s=>`
+        <li class="flex justify-between gap-2 text-xs text-gray-600"><span>${escHtml(s.nome)}</span><span class="font-bold text-red-500 flex-shrink-0">${s.n}×</span></li>`).join('')}
+      </ul>
+    </details></li>`).join('')}</ul>`;
+  if(!mostrarMateria) return temasHtml(Object.values(porMateria)[0]?.temas||{});
+  return ordenar(porMateria).map(m=>`
+    <div class="mb-3">
+      <p class="text-xs font-bold text-purple-700 uppercase tracking-wide mb-1">${escHtml(m.nome)} · ${m.n} ${m.n===1?'erro':'erros'}</p>
+      ${temasHtml(m.temas)}
+    </div>`).join('');
+}
+
 function analisesHtml(ma){
   const lista = (currentC().analises||[]).filter(a=>a.ma===ma);
   if(!lista.length) return '';
-  const cont = {};
-  lista.forEach(a=>{ cont[a.assunto]=(cont[a.assunto]||0)+1; });
-  const ranking = Object.entries(cont).sort((a,b)=>b[1]-a[1]).slice(0,5);
   return `
     <div class="mt-5 border-t pt-4">
-      <p class="text-sm font-bold text-gray-700 mb-2">📌 Assuntos que você mais erra</p>
-      <ul class="text-sm space-y-1 mb-4">
-        ${ranking.map(([assunto,n])=>`<li class="flex justify-between gap-2"><span class="text-gray-700">${escHtml(assunto)}</span><span class="font-bold text-red-600 flex-shrink-0">${n}×</span></li>`).join('')}
-      </ul>
+      <p class="text-sm font-bold text-gray-700 mb-2">📌 Temas que você mais erra (${lista.length} questões)</p>
+      <div class="mb-4">${rankingTemasHtml(lista, false)}</div>
       <details>
         <summary class="text-sm font-bold text-gray-600 cursor-pointer">Histórico de análises (${lista.length})</summary>
         <div class="space-y-2 mt-2 max-h-96 overflow-y-auto">
@@ -1029,7 +1070,8 @@ function analisarErro(ma){
       const r = await fetch('/api/analisar',{
         method:'POST',
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-        body: JSON.stringify({materia:ma,questao,resposta,gabarito})
+        body: JSON.stringify({materia:ma,questao,resposta,gabarito,
+          temas:[...new Set((currentC().analises||[]).filter(a=>a.ma===ma).map(a=>String(a.assunto||'').split('→')[0].trim()).filter(Boolean))]})
       });
       const dados = await r.json().catch(()=>({erro:'Resposta inválida do servidor.'}));
       if(!r.ok) throw new Error(dados.erro||('Erro '+r.status));
@@ -1069,6 +1111,18 @@ function analisesPendentes(c){
 }
 
 function renderAnalises(c){
+  const sub = e.analiseSub==='materiais' ? 'materiais' : 'questoes';
+  const btnSub = (val,rotulo) => `<button onclick="setAnaliseSub('${val}')" class="px-4 py-2 font-bold text-sm border-b-2 ${sub===val?'border-purple-600 text-purple-700':'border-transparent text-gray-500 hover:text-gray-700'}">${rotulo}</button>`;
+  return `
+<h2 class="text-2xl font-bold mb-3">🧠 Análise de Questões — ${c.nome}</h2>
+<div class="flex gap-2 border-b mb-6">
+  ${btnSub('questoes',`❓ Questões erradas (${(c.analises||[]).length})`)}
+  ${btnSub('materiais',`📄 Materiais de revisão (${(c.materiais||[]).length})`)}
+</div>
+${sub==='materiais' ? renderMateriais(c) : renderQuestoesAnalisadas(c)}`;
+}
+
+function renderQuestoesAnalisadas(c){
   const todas = c.analises||[];
   const materias = [...new Set([...c.cron.map(x=>x.ma), ...todas.map(a=>a.ma)])];
   const sel = materias.includes(e.analiseMateria) ? e.analiseMateria : '';
@@ -1080,14 +1134,9 @@ function renderAnalises(c){
     .filter(a=> filtro==='todas' || (filtro==='revisadas' ? a.revisada : !a.revisada))
     .sort((a,b)=>b.id-a.id);
 
-  const cont = {};
-  daMateria.forEach(a=>{ cont[a.assunto]=(cont[a.assunto]||0)+1; });
-  const ranking = Object.entries(cont).sort((a,b)=>b[1]-a[1]).slice(0,5);
-
   const btnFiltro = (val,rotulo,n) => `<button onclick="setAnaliseFiltro('${val}')" class="px-4 py-2 rounded-lg text-sm font-bold ${filtro===val?'bg-purple-600 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}">${rotulo} (${n})</button>`;
 
   return `
-<h2 class="text-2xl font-bold mb-2">🧠 Análise de Questões — ${c.nome}</h2>
 <p class="text-gray-500 text-sm mb-6">Questões erradas analisadas pela IA. Revise cada uma e marque como revisada.</p>
 
 <div class="flex flex-wrap items-end gap-3 mb-6">
@@ -1104,12 +1153,11 @@ function renderAnalises(c){
   ${sel?`<button onclick="analisarErro(this.dataset.ma)" data-ma="${escHtml(sel)}" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold">🤖 Analisar nova questão</button>`:''}
 </div>
 
-${ranking.length?`
+${daMateria.length?`
 <div class="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-6">
-  <p class="text-sm font-bold text-purple-900 mb-2">📌 Assuntos que você mais erra${sel?'':' (todas as matérias)'}</p>
-  <ul class="text-sm space-y-1">
-    ${ranking.map(([assunto,n])=>`<li class="flex justify-between gap-2"><span class="text-gray-700">${escHtml(assunto)}</span><span class="font-bold text-red-600 flex-shrink-0">${n}×</span></li>`).join('')}
-  </ul>
+  <p class="text-sm font-bold text-purple-900 mb-1">📌 Temas que você mais erra${sel?'':' — por matéria'} (${daMateria.length} questões)</p>
+  <p class="text-xs text-gray-500 mb-3">Clique num tema para ver os subtemas.</p>
+  ${rankingTemasHtml(daMateria, !sel)}
 </div>`:''}
 
 <div class="flex flex-wrap gap-2 mb-4">
@@ -1187,6 +1235,169 @@ function delAnalise(id, ma){
   const h = document.getElementById('ia-historico');
   if(h) h.innerHTML = analisesHtml(ma);
   else rend();
+}
+
+// ===== MATERIAIS DE REVISÃO (ex.: gerados num projeto do Claude a partir das questões erradas) =====
+// Cada material entra no ciclo de revisões igual às aulas (7d → 14d → 30d → 60d),
+// como revisões com `material` = id do material.
+function setAnaliseSub(sub){ e.analiseSub = sub; rend(); }
+
+function proximaRevMaterial(c, id){
+  const pend = c.revs.filter(r=>r.material===id && r.s==='p').sort((a,b)=>dmyParaISO(a.dr).localeCompare(dmyParaISO(b.dr)));
+  return pend[0];
+}
+
+function renderMateriais(c){
+  const lista = (c.materiais||[]).slice().sort((a,b)=>b.id-a.id);
+  return `
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+  <p class="text-gray-500 text-sm">Cole aqui o material de revisão (ex.: o que o projeto do Claude gerou). Ele entra nas <b>Revisões</b> no mesmo ciclo das aulas: 7d, 14d, 30d e 60d.</p>
+  <button onclick="addMaterial()" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold">+ Adicionar material</button>
+</div>
+${lista.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhum material de revisão ainda.</p>':`
+<div class="space-y-3">
+${lista.map(m=>{
+  const prox = proximaRevMaterial(c, m.id);
+  const feitas = c.revs.filter(r=>r.material===m.id && r.s==='c').length;
+  return `<div class="border-l-4 border-purple-400 bg-white rounded-lg p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+    <div class="min-w-0">
+      ${m.ma?`<p class="text-xs font-bold text-purple-600 mb-1">${escHtml(m.ma)}</p>`:''}
+      <p class="font-bold text-gray-800 break-words">📄 ${escHtml(m.titulo)}</p>
+      <p class="text-xs text-gray-500 mt-1">Adicionado em ${m.data} · ${feitas}/4 revisões feitas${prox?` · próxima: <b>${prox.t}</b> em ${prox.dr}`:' · ciclo concluído 🎉'}</p>
+    </div>
+    <div class="flex gap-2 flex-shrink-0">
+      <button onclick="abrirMaterial(${m.id})" class="bg-purple-100 hover:bg-purple-200 text-purple-800 px-4 py-2 rounded-lg text-sm font-bold">📖 Abrir</button>
+      <button onclick="delMaterial(${m.id})" class="text-red-500 hover:text-red-700 text-sm font-bold px-2">🗑️</button>
+    </div>
+  </div>`;
+}).join('')}
+</div>`}`;
+}
+
+function addMaterial(){
+  const c = currentC();
+  const materias = [...new Set([...c.cron.map(x=>x.ma), ...(c.analises||[]).map(a=>a.ma)])];
+  const sug = toISO(addDias(new Date(),7));
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:640px;max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold mb-4">📄 Adicionar material de revisão</h3>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Título</label>
+        <input id="mat-titulo" placeholder="Ex: Revisão — Triângulo de exposição e flash" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-purple-500 focus:outline-none">
+
+        <div class="grid md:grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">Matéria (opcional)</label>
+            <input id="mat-ma" list="mat-ma-lista" value="${escHtml(e.analiseMateria||'')}" placeholder="Ex: Fotografia" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-purple-500 focus:outline-none">
+            <datalist id="mat-ma-lista">${materias.map(m=>`<option value="${escHtml(m)}">`).join('')}</datalist>
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data da 1ª revisão</label>
+            <input id="mat-data1" type="date" value="${sug}" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-purple-500 focus:outline-none">
+          </div>
+        </div>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Conteúdo</label>
+        <textarea id="mat-conteudo" rows="12" placeholder="Cole aqui o material (pode ser em Markdown, do jeito que o Claude gera)" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-2 font-mono focus:border-purple-500 focus:outline-none"></textarea>
+        <label class="text-xs text-purple-700 font-semibold cursor-pointer hover:underline">📎 ou carregar de um arquivo .md / .txt
+          <input id="mat-arquivo" type="file" accept=".md,.txt,.markdown,text/plain,text/markdown" class="hidden">
+        </label>
+
+        <div class="flex gap-3 mt-5">
+          <button id="mat-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="mat-salvar" class="flex-1 bg-purple-600 text-white rounded-lg py-2.5 font-semibold hover:bg-purple-700">Salvar e agendar revisões</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('mat-arquivo').onchange = async ev => {
+    const f = ev.target.files[0];
+    if(!f) return;
+    document.getElementById('mat-conteudo').value = await f.text();
+    const t = document.getElementById('mat-titulo');
+    if(!t.value.trim()) t.value = f.name.replace(/\.[^.]+$/,'');
+  };
+  document.getElementById('mat-cancelar').onclick = () => { document.getElementById('modal-root').innerHTML=''; };
+  document.getElementById('mat-salvar').onclick = () => {
+    const titulo = document.getElementById('mat-titulo').value.trim();
+    const ma = document.getElementById('mat-ma').value.trim();
+    const conteudo = document.getElementById('mat-conteudo').value.trim();
+    const dataStr = document.getElementById('mat-data1').value;
+    if(!titulo){ntf('❌ Dê um título ao material','er');return;}
+    if(!conteudo){ntf('❌ Cole o conteúdo do material','er');return;}
+    if(!dataStr){ntf('❌ Informe a data da 1ª revisão','er');return;}
+    const [y,mo,d] = dataStr.split('-');
+    const data1 = new Date(+y,+mo-1,+d);
+    const id = Date.now();
+    if(!c.materiais) c.materiais=[];
+    c.materiais.push({id, titulo, ma, conteudo, data: fmtDMY(new Date())});
+    INTERVALOS_REV.forEach(({t,dias,cor})=>{
+      c.revs.push({
+        id:`mat${id}-${t}-${Math.random().toString(36).substr(2,4)}`,
+        di:'mat'+id, material:id, ma: ma||titulo, titulo, i:'', f:'', q:0,
+        dr:fmtDMY(addDias(data1,dias)), t, s:'p', cor
+      });
+    });
+    document.getElementById('modal-root').innerHTML='';
+    sv();rend();
+    ntf(`📄 Material salvo! 1ª revisão em ${fmtDMY(data1)}.`);
+  };
+}
+
+let markedPromise = null;
+async function mdParaHtml(texto){
+  try{
+    markedPromise ||= import('https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js').then(mod=>{
+      // HTML cru dentro do material é mostrado como texto, não executado
+      mod.marked.use({renderer:{html(h){ return escHtml(typeof h==='string'?h:h.text); }}});
+      return mod.marked;
+    });
+    const marked = await markedPromise;
+    return `<div class="md">${marked.parse(texto)}</div>`;
+  }catch(err){
+    markedPromise = null;
+    return `<div class="whitespace-pre-wrap">${escHtml(texto)}</div>`;
+  }
+}
+
+async function abrirMaterial(id, revId){
+  const c = currentC();
+  const m = (c.materiais||[]).find(x=>x.id===id);
+  if(!m){ntf('❌ Material não encontrado','er');return;}
+  const rev = revId ? c.revs.find(r=>r.id===revId && r.s==='p') : null;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:820px;max-height:90vh;display:flex;flex-direction:column">
+        <div class="flex justify-between items-start gap-3 mb-3">
+          <div class="min-w-0">
+            ${m.ma?`<p class="text-xs font-bold text-purple-600">${escHtml(m.ma)}</p>`:''}
+            <h3 class="text-lg font-bold break-words">📄 ${escHtml(m.titulo)}</h3>
+          </div>
+          <button id="mat-fechar" class="text-gray-400 hover:text-gray-700 text-2xl leading-none flex-shrink-0">×</button>
+        </div>
+        <div id="mat-corpo" class="overflow-y-auto text-sm text-gray-800 border-t pt-3 flex-1"><p class="text-gray-400">Carregando...</p></div>
+        ${rev?`<div class="border-t pt-3 mt-3 flex justify-end">
+          <button id="mat-revisei" class="bg-gradient-to-r from-${rev.cor}-500 to-${rev.cor}-600 text-white px-6 py-2.5 rounded-lg font-bold">✓ Revisei (${rev.t})</button>
+        </div>`:''}
+      </div>
+    </div>`;
+  const fechar = () => { document.getElementById('modal-root').innerHTML=''; };
+  document.getElementById('mat-fechar').onclick = fechar;
+  if(rev) document.getElementById('mat-revisei').onclick = () => { fechar(); mkR(rev.id); };
+  const corpo = document.getElementById('mat-corpo');
+  const html = await mdParaHtml(m.conteudo);
+  if(corpo.isConnected) corpo.innerHTML = html;
+}
+
+function delMaterial(id){
+  const c = currentC();
+  const m = (c.materiais||[]).find(x=>x.id===id);
+  if(!m || !confirm(`Remover o material "${m.titulo}" e as revisões pendentes dele?`)) return;
+  c.materiais = c.materiais.filter(x=>x.id!==id);
+  c.revs = c.revs.filter(r=>!(r.material===id && r.s==='p'));
+  sv();rend();
+  ntf('🗑️ Material removido');
 }
 
 function delQuestao(id){
@@ -1970,10 +2181,11 @@ ${grupo.itens.map((r,i)=>`  <div class="${i>0?'border-t border-gray-100 pt-4':''
         </div>
         <div class="flex gap-2 flex-wrap text-xs mb-3">
           <span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span>
+          ${r.material?`<span class="bg-purple-100 text-purple-700 px-3 py-1 rounded font-bold">📄 Material de revisão</span>`:`
           <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
-          <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>
+          <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>`}
         </div>
-        ${r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
+        ${r.material?`<p class="text-sm text-gray-700 mb-2">${escHtml(r.titulo)}</p><button onclick="abrirMaterial(${r.material},'${r.id}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-bold">📖 Abrir material</button>`:r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
       </div>
       <button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button>
     </div>
@@ -1991,7 +2203,7 @@ ${completasSemana.length>0?`<div>
 ${grupo.itens.map(r=>`  <div>
     <h4 class="font-bold line-through text-gray-700">${r.ma}</h4>
     <div class="flex gap-2 text-xs mt-1">
-      <span class="bg-gray-100 px-2 py-1 rounded">Aulas ${r.i}-${r.f}</span>
+      <span class="bg-gray-100 px-2 py-1 rounded">${r.material?'📄 Material':`Aulas ${r.i}-${r.f}`}</span>
       <span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span>
       ${r.extra?'<span class="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded font-bold">⭐ extra</span>':''}
     </div>
@@ -2172,6 +2384,10 @@ ${svgChartPomodoros(14)}
   window.setAnaliseMateria = setAnaliseMateria;
   window.setAnaliseFiltro = setAnaliseFiltro;
   window.toggleRevisada = toggleRevisada;
+  window.setAnaliseSub = setAnaliseSub;
+  window.addMaterial = addMaterial;
+  window.abrirMaterial = abrirMaterial;
+  window.delMaterial = delMaterial;
   window.pomoToggle = pomoToggle;
   window.pomoReset = pomoReset;
   window.pomoPularPausa = pomoPularPausa;
