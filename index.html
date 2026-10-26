@@ -1463,6 +1463,10 @@ const CAD_CSS_JANELA = `
   .ql-editor h3{font-size:1.15em;line-height:26px;margin:0}
   .ql-editor .ql-size-large{line-height:26px}.ql-editor .ql-size-huge{line-height:52px}
   .ql-editor img{display:block;margin:4px 0}
+  /* tabelas: colunas do tamanho do conteúdo (o padrão do Quill divide em partes iguais) */
+  .ql-editor table{table-layout:auto;width:auto;max-width:100%;border-collapse:collapse;background:#fff;margin:4px 0}
+  .ql-editor td{border:1px solid #9ca3af;padding:4px 14px;line-height:20px;vertical-align:top;min-width:70px}
+  .ql-editor tr:first-child td{background:#eef2ff}
   .ql-marcatexto{width:32px!important}
 `;
 
@@ -1889,6 +1893,9 @@ const CAD_CSS_EXPORT = `
   .ql-align-center{text-align:center}.ql-align-right{text-align:right}.ql-align-justify{text-align:justify}
   .ql-size-small{font-size:9pt}.ql-size-large{font-size:16pt}.ql-size-huge{font-size:22pt}
   .ql-indent-1{margin-left:3em}.ql-indent-2{margin-left:6em}.ql-indent-3{margin-left:9em}.ql-indent-4{margin-left:12em}
+  table{border-collapse:collapse;margin:6px 0}
+  td,th{border:1px solid #9ca3af;padding:4px 12px;vertical-align:top}
+  tr:first-child td{background:#eef2ff}
 `;
 async function cadExportar(materiaId, formato, topicoId){
   const m = cad().materias.find(x=>x.id===materiaId);
