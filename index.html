@@ -1201,9 +1201,16 @@ ${lista.map(a=>`
         <ul class="list-disc ml-5 mt-1">${(a.revisar||[]).map(t=>`<li>${escHtml(t)}</li>`).join('')}</ul>
       </div>
       <p class="text-gray-600 whitespace-pre-wrap bg-gray-50 rounded-lg p-3"><span class="font-bold">Questão:</span> ${escHtml(a.questao)}</p>
+      ${a.obs?`<div class="bg-amber-50 border border-amber-200 rounded-lg p-3"><p class="text-xs font-bold text-amber-800 mb-1">🗒️ Minhas observações</p><p class="text-gray-800 whitespace-pre-wrap">${escHtml(a.obs)}</p></div>`:''}
+      ${a.revisada?(()=>{ const prox = proximaRevAnalise(c, a.id); const feitas = c.revs.filter(r=>r.analise===a.id && r.s==='c').length;
+        if(!prox && !feitas) return ''; // revisada antes de existir o agendamento
+        return `<p class="text-xs text-gray-500">🔄 Revisões: ${feitas}/4 feitas${prox?` · próxima: <b>${prox.t}</b> em ${prox.dr}`:(feitas?' · ciclo concluído 🎉':'')}</p>`; })():''}
     </div>
-    <div class="flex gap-2 mt-3">
-      <button onclick="toggleRevisada(${a.id})" class="${a.revisada?'bg-white border-2 border-gray-300 text-gray-600 hover:bg-gray-50':'bg-green-600 hover:bg-green-700 text-white'} px-4 py-2 rounded-lg text-sm font-bold">${a.revisada?'↩️ Marcar como não revisada':'✅ Marcar como revisada'}</button>
+    <div class="flex flex-wrap gap-2 mt-3">
+      ${a.revisada
+        ? `<button onclick="desmarcarRevisada(${a.id})" class="bg-white border-2 border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-bold">↩️ Marcar como não revisada</button>`
+        : `<button onclick="marcarRevisada(${a.id})" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold">✅ Marcar como revisada</button>`}
+      <button onclick="editarObsAnalise(${a.id})" class="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-4 py-2 rounded-lg text-sm font-bold">🗒️ ${a.obs?'Editar observações':'Observações'}</button>
       <button onclick="delAnalise(${a.id})" class="text-red-500 hover:text-red-700 text-sm font-bold px-2">🗑️</button>
     </div>
   </details>`).join('')}
@@ -1220,24 +1227,114 @@ function setAnaliseFiltro(f){
   rend();
 }
 
-function toggleRevisada(id){
-  const a = (currentC().analises||[]).find(x=>x.id===id);
+// ===== Revisão das questões analisadas =====
+// "Marcar como revisada" abre um modal para escrever observações e agenda a questão no mesmo
+// ciclo das aulas (7d → 14d → 30d → 60d), como revisões com `analise` = id da análise.
+function proximaRevAnalise(c, id){
+  return c.revs.filter(r=>r.analise===id && r.s==='p')
+    .sort((x,y)=>dmyParaISO(x.dr).localeCompare(dmyParaISO(y.dr)))[0];
+}
+
+function modalObsAnalise(a, {titulo, agendar, aoSalvar}){
+  const sug = toISO(addDias(new Date(),7));
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:600px;max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold mb-1">${titulo}</h3>
+        <p class="text-xs font-bold text-purple-600">${escHtml(a.ma)}</p>
+        <p class="text-sm font-bold text-gray-800 mb-3">${escHtml(a.assunto)}</p>
+        <details class="bg-gray-50 rounded-lg p-3 text-sm mb-4">
+          <summary class="cursor-pointer font-semibold text-gray-600">Ver a questão e a análise</summary>
+          <div class="mt-2 space-y-2">
+            <p><span class="font-bold text-red-600">❌ Por que errou:</span> ${escHtml(a.motivo_erro)}</p>
+            <div><span class="font-bold text-green-700">📚 Revisar:</span><ul class="list-disc ml-5 mt-1">${(a.revisar||[]).map(t=>`<li>${escHtml(t)}</li>`).join('')}</ul></div>
+            <p class="text-gray-600 whitespace-pre-wrap"><span class="font-bold">Questão:</span> ${escHtml(a.questao)}</p>
+          </div>
+        </details>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">🗒️ Observações</label>
+        <textarea id="obs-texto" rows="7" placeholder="O que você aprendeu com essa questão, pegadinhas, macetes, o que lembrar na próxima vez..."
+          class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-amber-500 focus:outline-none">${escHtml(a.obs||'')}</textarea>
+        ${agendar?`
+        <label class="block text-sm font-semibold text-gray-700 mb-1">📅 Data da 1ª revisão</label>
+        <input id="obs-data1" type="date" value="${sug}" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-1 focus:border-amber-500 focus:outline-none">
+        <p class="text-xs text-gray-400 mb-2">A questão entra nas Revisões em 7d, 14d, 30d e 60d, igual às aulas.</p>`:''}
+        <div class="flex gap-3 mt-4">
+          <button id="obs-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="obs-salvar" class="flex-1 bg-green-600 text-white rounded-lg py-2.5 font-semibold hover:bg-green-700">${agendar?'✅ Revisada e agendar':'Salvar'}</button>
+        </div>
+      </div>
+    </div>`;
+  const fechar = () => { document.getElementById('modal-root').innerHTML=''; };
+  document.getElementById('obs-cancelar').onclick = fechar;
+  document.getElementById('obs-salvar').onclick = () => {
+    const obs = document.getElementById('obs-texto').value.trim();
+    let data1 = null;
+    if(agendar){
+      const v = document.getElementById('obs-data1').value;
+      if(!v){ntf('❌ Informe a data da 1ª revisão','er');return;}
+      const [y,mo,d] = v.split('-'); data1 = new Date(+y,+mo-1,+d);
+    }
+    if(obs) a.obs = obs; else delete a.obs;
+    aoSalvar(data1);
+    fechar(); sv(); rend();
+  };
+  setTimeout(()=>document.getElementById('obs-texto')?.focus(), 50);
+}
+
+function marcarRevisada(id){
+  const c = currentC();
+  const a = (c.analises||[]).find(x=>x.id===id);
   if(!a) return;
-  a.revisada = !a.revisada;
-  if(a.revisada){
-    const h = new Date();
-    a.revisadaEm = String(h.getDate()).padStart(2,'0')+'/'+String(h.getMonth()+1).padStart(2,'0')+'/'+h.getFullYear();
-    ntf('✅ Questão marcada como revisada');
-  } else {
-    delete a.revisadaEm;
+  modalObsAnalise(a, {titulo:'✅ Marcar questão como revisada', agendar:true, aoSalvar:(data1)=>{
+    a.revisada = true;
+    a.revisadaEm = fmtDMY(new Date());
+    // tira revisões pendentes antigas desta questão (se tinha desmarcado e marcou de novo)
+    c.revs = c.revs.filter(r=>!(r.analise===a.id && r.s==='p'));
+    INTERVALOS_REV.forEach(({t,dias,cor})=>{
+      c.revs.push({
+        id:`an${a.id}-${t}-${Math.random().toString(36).substr(2,4)}`,
+        di:'an'+a.id, analise:a.id, ma:a.ma, titulo:a.assunto, i:'', f:'', q:0,
+        dr:fmtDMY(addDias(data1,dias)), t, s:'p', cor
+      });
+    });
+    ntf(`✅ Revisada! 1ª revisão da questão em ${fmtDMY(data1)}.`);
+  }});
+}
+
+function editarObsAnalise(id, revId){
+  const c = currentC();
+  const a = (c.analises||[]).find(x=>x.id===id);
+  if(!a) return;
+  modalObsAnalise(a, {titulo: revId ? '🔄 Revisar questão' : '🗒️ Observações da questão', agendar:false, aoSalvar:()=>{
+    ntf('🗒️ Observações salvas');
+  }});
+  // vindo da aba Revisões: oferece já marcar esta revisão como feita
+  const rev = revId && c.revs.find(r=>r.id===revId && r.s==='p');
+  if(rev){
+    const btn = document.getElementById('obs-salvar');
+    btn.textContent = `✓ Revisei (${rev.t})`;
+    const salvar = btn.onclick;
+    btn.onclick = () => { salvar(); mkR(rev.id); };
   }
-  sv();rend();
+}
+
+function desmarcarRevisada(id){
+  const c = currentC();
+  const a = (c.analises||[]).find(x=>x.id===id);
+  if(!a) return;
+  const pend = c.revs.filter(r=>r.analise===id && r.s==='p').length;
+  if(pend && !confirm(`Desmarcar esta questão? As ${pend} revisões pendentes dela serão removidas.`)) return;
+  a.revisada = false;
+  delete a.revisadaEm;
+  c.revs = c.revs.filter(r=>!(r.analise===id && r.s==='p'));
+  sv(); rend();
 }
 
 function delAnalise(id, ma){
   if(!confirm('Remover esta análise?')) return;
   const c = currentC();
   c.analises = (c.analises||[]).filter(a=>a.id!==id);
+  c.revs = c.revs.filter(r=>!(r.analise===id && r.s==='p'));
   sv();
   const h = document.getElementById('ia-historico');
   if(h) h.innerHTML = analisesHtml(ma);
@@ -2786,11 +2883,11 @@ ${grupo.itens.map((r,i)=>`  <div class="${i>0?'border-t border-gray-100 pt-4':''
         </div>
         <div class="flex gap-2 flex-wrap text-xs mb-3">
           <span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span>
-          ${r.material?`<span class="bg-purple-100 text-purple-700 px-3 py-1 rounded font-bold">📄 Material de revisão</span>`:`
+          ${r.analise?`<span class="bg-rose-100 text-rose-700 px-3 py-1 rounded font-bold">❓ Questão errada</span>`:r.material?`<span class="bg-purple-100 text-purple-700 px-3 py-1 rounded font-bold">📄 Material de revisão</span>`:`
           <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
           <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>`}
         </div>
-        ${r.material?`<p class="text-sm text-gray-700 mb-2">${escHtml(r.titulo)}</p><button onclick="abrirMaterial(${r.material},'${r.id}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-bold">📖 Abrir material</button>`:r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
+        ${r.analise?`<p class="text-sm text-gray-700 mb-2">${escHtml(r.titulo)}</p><button onclick="editarObsAnalise(${r.analise},'${r.id}')" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-sm font-bold">❓ Ver questão e observações</button>`:r.material?`<p class="text-sm text-gray-700 mb-2">${escHtml(r.titulo)}</p><button onclick="abrirMaterial(${r.material},'${r.id}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-bold">📖 Abrir material</button>`:r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
       </div>
       <button onclick="mkR('${r.id}')" class="bg-gradient-to-r from-${r.cor}-500 to-${r.cor}-600 text-white px-6 py-3 rounded-lg hover:shadow-lg font-bold whitespace-nowrap flex-shrink-0">✓ Revisei</button>
     </div>
@@ -2808,7 +2905,7 @@ ${completasSemana.length>0?`<div>
 ${grupo.itens.map(r=>`  <div>
     <h4 class="font-bold line-through text-gray-700">${r.ma}</h4>
     <div class="flex gap-2 text-xs mt-1">
-      <span class="bg-gray-100 px-2 py-1 rounded">${r.material?'📄 Material':`Aulas ${r.i}-${r.f}`}</span>
+      <span class="bg-gray-100 px-2 py-1 rounded">${r.analise?'❓ Questão':r.material?'📄 Material':`Aulas ${r.i}-${r.f}`}</span>
       <span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span>
       ${r.extra?'<span class="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded font-bold">⭐ extra</span>':''}
     </div>
@@ -2991,7 +3088,9 @@ ${svgChartPomodoros(14)}
   window.delAnalise = delAnalise;
   window.setAnaliseMateria = setAnaliseMateria;
   window.setAnaliseFiltro = setAnaliseFiltro;
-  window.toggleRevisada = toggleRevisada;
+  window.marcarRevisada = marcarRevisada;
+  window.desmarcarRevisada = desmarcarRevisada;
+  window.editarObsAnalise = editarObsAnalise;
   window.setAnaliseSub = setAnaliseSub;
   window.cadAddMateria = cadAddMateria;
   window.cadImportarMaterias = cadImportarMaterias;
