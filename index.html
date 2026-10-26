@@ -1707,6 +1707,14 @@ async function cadAbrirTopico(id){
   await cadCarregarNaJanela(win, id);
 }
 
+// Se a página termina numa tabela, o cursor não consegue sair dela para escrever embaixo.
+// Garante sempre uma linha comum depois de uma tabela no fim do documento.
+function cadLinhaDepoisDaTabela(q, origem){
+  try{
+    if(q.root.lastElementChild?.tagName==='TABLE') q.insertText(q.getLength(), '\n', origem);
+  }catch(err){ console.warn('Não foi possível adicionar linha após a tabela:', err); }
+}
+
 function cadTabelaSemTh(html){
   return html
     .replace(/<thead(\s[^>]*)?>/gi,'<tbody>').replace(/<\/thead>/gi,'</tbody>')
@@ -1847,11 +1855,13 @@ async function cadCarregarNaJanela(win, topico){
     if(d.getElementById('status').textContent==='Carregando...') cadStatus('');
   }
   q.clipboard.dangerouslyPasteHTML(html||'', 'silent');
+  cadLinhaDepoisDaTabela(q, 'silent');
   q.history.clear();
   q.on('text-change', (delta, old, source)=>{
     if(source!=='user') return;
     cadCache[topico] = q.root.innerHTML;
     cadAgendarSalvar(topico);
+    setTimeout(()=>cadLinhaDepoisDaTabela(q, 'user'), 0);
   });
   // O Quill só entende <td>: as células de cabeçalho (<th>) de tabelas coladas (ex.: do Claude)
   // viravam uma célula só com tudo junto. Converte para <td> em negrito antes de colar.
