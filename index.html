@@ -1523,6 +1523,7 @@ async function cadInserirImagens(range, files){
 }
 
 async function montarEditorCaderno(){
+  cadSincronizarPendentes();
   const el = document.getElementById('cad-editor');
   if(!el || !cadSel) return;
   if(!window.Quill){ el.innerHTML = '<p class="p-4 text-red-600 text-sm">❌ Não foi possível carregar o editor. Verifique a internet e recarregue a página.</p>'; return; }
@@ -1572,9 +1573,9 @@ async function montarEditorCaderno(){
       html = localStorage.getItem('cad_'+topico) || '';
       cadStatus('⚠️ Sem conexão com a nuvem — mostrando a cópia deste navegador','text-amber-600');
     }
-    // backup local mais novo que a nuvem (ex.: salvamento que falhou)
+    // página que não conseguiu ir para a nuvem: a cópia do navegador é a mais nova
     const local = localStorage.getItem('cad_'+topico);
-    if(local && local!==html && !html) html = local;
+    if(local!==null && (cadPendentesLocais().includes(topico) || !html)) html = local;
     cadCache[topico] = html;
     if(cadQuill!==q) return; // usuário trocou de página enquanto carregava
     q.enable();
@@ -1587,6 +1588,34 @@ async function montarEditorCaderno(){
     cadCache[topico] = q.root.innerHTML;
     cadAgendarSalvar(topico);
   });
+}
+
+// Páginas que não conseguiram ir para a nuvem (ficam no localStorage até sincronizar)
+function cadPendentesLocais(){ try{ return JSON.parse(localStorage.getItem('cad_pendentes')||'[]'); }catch{ return []; } }
+function cadMarcarPendente(topico, pendente){
+  try{
+    const set = new Set(cadPendentesLocais());
+    pendente ? set.add(topico) : set.delete(topico);
+    localStorage.setItem('cad_pendentes', JSON.stringify([...set]));
+  }catch{}
+}
+let cadSincronizando = false;
+async function cadSincronizarPendentes(){
+  if(cadSincronizando || !userId) return;
+  const lista = cadPendentesLocais().filter(id=>cadAcharTopico(id));
+  if(!lista.length) return;
+  cadSincronizando = true;
+  let enviados = 0;
+  for(const id of lista){
+    const html = localStorage.getItem('cad_'+id);
+    if(html===null){ cadMarcarPendente(id,false); continue; }
+    try{
+      await setDoc(cadDocRef(id), {html, atualizado:new Date().toISOString()});
+      cadMarcarPendente(id,false); enviados++;
+    }catch(err){ break; } // ainda bloqueado: tenta de novo depois
+  }
+  cadSincronizando = false;
+  if(enviados) ntf(`☁️ ${enviados} página(s) do caderno enviada(s) para a nuvem!`);
 }
 
 function cadAgendarSalvar(topico){
@@ -1609,9 +1638,12 @@ async function cadSalvarAgora(){
   }
   try{
     await setDoc(cadDocRef(topico), {html, atualizado:new Date().toISOString()});
+    cadMarcarPendente(topico, false);
     if(cadQuillTopico===topico) cadStatus('✓ Salvo','text-green-600');
+    cadSincronizarPendentes();
   }catch(err){
     console.error('Erro ao salvar caderno:', err);
+    cadMarcarPendente(topico, true);
     cadStatus(err?.code==='permission-denied'
       ? '⚠️ O Firebase bloqueou o salvamento (regras). Guardado só neste navegador.'
       : '⚠️ Erro ao salvar na nuvem. Guardado neste navegador; tento de novo ao editar.', 'text-red-600');
