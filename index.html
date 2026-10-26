@@ -1606,6 +1606,12 @@ async function cadAbrirTopico(id){
   await cadCarregarNaJanela(win, id);
 }
 
+function cadTabelaSemTh(html){
+  return html
+    .replace(/<thead(\s[^>]*)?>/gi,'<tbody>').replace(/<\/thead>/gi,'</tbody>')
+    .replace(/<th(\s[^>]*)?>/gi,'<td$1><strong>').replace(/<\/th>/gi,'</strong></td>');
+}
+
 function cadEhPiP(win){
   try{ return !!(window.documentPictureInPicture && documentPictureInPicture.window===win); }catch{ return false; }
 }
@@ -1746,6 +1752,16 @@ async function cadCarregarNaJanela(win, topico){
     cadCache[topico] = q.root.innerHTML;
     cadAgendarSalvar(topico);
   });
+  // O Quill só entende <td>: as células de cabeçalho (<th>) de tabelas coladas (ex.: do Claude)
+  // viravam uma célula só com tudo junto. Converte para <td> em negrito antes de colar.
+  q.container.addEventListener('paste', ev=>{
+    const html = ev.clipboardData?.getData('text/html');
+    if(!html || !/<th[\s>]/i.test(html) || !q.isEnabled()) return;
+    ev.preventDefault(); // o Quill ignora colagens já tratadas (defaultPrevented)
+    const range = q.getSelection(true);
+    if(!range) return;
+    q.clipboard.onPaste(range, {html: cadTabelaSemTh(html), text: ev.clipboardData.getData('text/plain')});
+  }, true);
   q.focus();
 }
 
