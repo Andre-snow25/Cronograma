@@ -1416,6 +1416,7 @@ function delMaterial(id){
 // frente mesmo trocando de programa e pode ser movida/redimensionada. Sem esse recurso, abre um pop-up.
 let cadMatAberta = null;      // caderno (matéria) aberto na tela principal
 let cadJanela = null;         // janela da página solta
+let cadJanelaPiP = false;     // true = janela "sempre na frente" (Picture-in-Picture)
 let cadQuill = null, cadQuillTopico = null;
 const cadCache = {};          // topicoId -> html já carregado/editado
 let cadSalvarTimer = null, cadPendente = null;
@@ -1442,7 +1443,10 @@ const CAD_CSS_JANELA = `
   #topo{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;background:#fff;border-bottom:1px solid #e5e7eb}
   #mat{font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.04em}
   #tit{font-size:16px;font-weight:700;color:#111827;word-break:break-word}
-  #status{font-size:12px;color:#9ca3af;flex-shrink:0;text-align:right}
+  #status{font-size:12px;color:#9ca3af;text-align:right}
+  #acoes{display:flex;align-items:center;gap:10px;flex-shrink:0}
+  #btn-grande{font:600 12px system-ui,sans-serif;color:#4338ca;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+  #btn-grande:hover{background:#e0e7ff}
   #wrap{flex:1;display:flex;flex-direction:column;min-height:0}
   .ql-toolbar.ql-snow{background:#f9fafb;border:none;border-bottom:1px solid #e5e7eb}
   .ql-container.ql-snow{flex:1;overflow:auto;border:none}
@@ -1595,26 +1599,54 @@ async function cadAbrirTopico(id){
       win = window.open('', 'caderno-pagina', 'popup=yes,width=680,height=820');
       if(!win){ ntf('❌ O navegador bloqueou a janela. Permita pop-ups para este site.','er'); return; }
     }
-    cadJanela = win;
-    try{ await cadPrepararJanela(win); }
-    catch{ ntf('❌ Não foi possível carregar o editor. Verifique a internet.','er'); return; }
-    win.addEventListener('pagehide', ()=>{
-      if(cadJanela!==win) return;
-      cadGuardarEditor();
-      if(cadPendente) cadSalvarAgora();
-      cadJanela = null; cadQuill = null; cadQuillTopico = null;
-      rend();
-    });
+    if(!(await cadUsarJanela(win, cadEhPiP(win)))) return;
   } else {
     try{ win.focus(); }catch{}
   }
   await cadCarregarNaJanela(win, id);
 }
 
+function cadEhPiP(win){
+  try{ return !!(window.documentPictureInPicture && documentPictureInPicture.window===win); }catch{ return false; }
+}
+// Passa a usar `win` como página solta: monta o editor e cuida do salvamento ao fechar
+async function cadUsarJanela(win, pip){
+  cadJanela = win; cadJanelaPiP = pip;
+  try{ await cadPrepararJanela(win); }
+  catch{ ntf('❌ Não foi possível carregar o editor. Verifique a internet.','er'); return false; }
+  win.addEventListener('pagehide', ()=>{
+    if(cadJanela!==win) return; // já trocou para outra janela (ex.: "janela grande")
+    cadGuardarEditor();
+    if(cadPendente) cadSalvarAgora();
+    cadJanela = null; cadQuill = null; cadQuillTopico = null;
+    rend();
+  });
+  return true;
+}
+
+// Da janela "sempre na frente" (que o Chrome limita de tamanho) para uma janela comum, maximizada
+async function cadJanelaGrande(){
+  const pip = cadJanela, topico = cadQuillTopico;
+  if(!pip || !topico) return;
+  const sw = screen.availWidth, sh = screen.availHeight;
+  // abre a partir da própria janela solta, que é onde aconteceu o clique
+  const grande = pip.open('', 'caderno-grande', `popup=yes,left=0,top=0,width=${sw},height=${sh}`);
+  if(!grande){ cadStatus('❌ O navegador bloqueou a janela. Permita pop-ups para este site.','text-red-600'); return; }
+  cadGuardarEditor();
+  if(cadPendente) cadSalvarAgora();
+  cadQuill = null; cadQuillTopico = null;
+  if(!(await cadUsarJanela(grande, false))) return;
+  try{ pip.close(); }catch{}
+  try{ grande.moveTo(0,0); grande.resizeTo(sw, sh); }catch{}
+  await cadCarregarNaJanela(grande, topico);
+}
+
 async function cadPrepararJanela(win){
   const d = win.document;
   d.head.innerHTML = `<meta charset="utf-8"><link rel="stylesheet" href="${QUILL_CSS}"><style>${CAD_CSS_JANELA}</style>`;
-  d.body.innerHTML = `<div id="topo"><div><div id="mat"></div><div id="tit"></div></div><span id="status"></span></div><div id="wrap"></div>`;
+  d.body.innerHTML = `<div id="topo"><div><div id="mat"></div><div id="tit"></div></div><div id="acoes"><span id="status"></span>${
+    cadJanelaPiP ? '<button id="btn-grande" title="Abrir este tópico numa janela comum, do tamanho da tela (não fica sempre na frente)">⛶ Janela grande</button>' : ''}</div></div><div id="wrap"></div>`;
+  d.getElementById('btn-grande')?.addEventListener('click', cadJanelaGrande);
   if(!win.Quill){
     // o Quill precisa rodar dentro da própria janela (ele usa o "document" dela)
     await new Promise((ok, falha)=>{
