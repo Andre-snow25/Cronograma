@@ -36,8 +36,6 @@ textarea{resize:vertical;min-height:60px}
 .md code{background:#f3f4f6;padding:1px 4px;border-radius:4px}
 .md blockquote{border-left:4px solid #c4b5fd;padding-left:.8rem;color:#4b5563;margin:.5rem 0}
 .md hr{margin:1rem 0}
-#cad-editor{min-height:60vh;font-size:15px;background:#fff}
-#cad-editor .ql-editor{min-height:60vh;line-height:1.6}
 .ql-editor h1{font-size:1.9em;font-weight:700;margin:.6em 0 .3em}
 .ql-editor h2{font-size:1.45em;font-weight:700;margin:.6em 0 .3em}
 .ql-editor h3{font-size:1.2em;font-weight:700;margin:.5em 0 .25em}
@@ -1409,16 +1407,22 @@ function delMaterial(id){
   ntf('🗑️ Material removido');
 }
 
-// ===== CADERNO DIGITAL: matérias → tópicos, cada tópico é uma página com editor estilo Word =====
+// ===== CADERNO DIGITAL: um caderno por matéria → tópicos, cada tópico é uma página com editor estilo Word =====
 // O índice (matérias/tópicos) fica em e.caderno, junto com o resto dos dados. O texto de cada
 // página fica num documento próprio (cronogramas/{uid}/caderno/{topicoId}) para não estourar o
 // limite de 1 MB do documento principal; uma cópia fica no navegador como reserva.
+// A tela principal mostra os cadernos (um por matéria) e os tópicos de cada um. Cada tópico abre
+// numa "página solta": uma janela Document Picture-in-Picture (Chrome/Edge), que fica sempre na
+// frente mesmo trocando de programa e pode ser movida/redimensionada. Sem esse recurso, abre um pop-up.
+let cadMatAberta = null;      // caderno (matéria) aberto na tela principal
+let cadJanela = null;         // janela da página solta
 let cadQuill = null, cadQuillTopico = null;
-let cadSel = null;            // id do tópico aberto
-let cadAbertas = {};          // matérias expandidas na lateral
 const cadCache = {};          // topicoId -> html já carregado/editado
 let cadSalvarTimer = null, cadPendente = null;
 const CAD_LIMITE = 900*1024;
+const QUILL_JS = 'https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js';
+const QUILL_CSS = 'https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css';
+const CAD_CORES_CAPA = ['#4f46e5','#0d9488','#dc2626','#d97706','#7c3aed','#2563eb','#db2777','#16a34a','#475569','#b45309'];
 const CAD_CORES_TEXTO = ['#000000','#4b5563','#9ca3af','#dc2626','#ea580c','#ca8a04','#16a34a','#0d9488','#2563eb','#1e3a8a','#7c3aed','#db2777','#92400e','#ffffff'];
 const CAD_CORES_MARCA = [false,'#fff176','#ffd54f','#b9f6ca','#b3e5fc','#f8bbd0','#ffe0b2','#e1bee7','#e5e7eb'];
 const CAD_MARCA_PADRAO = '#fff176';
@@ -1430,6 +1434,20 @@ const CAD_DICAS = {
   '.ql-indent[value="-1"]':'Diminuir recuo','.ql-indent[value="+1"]':'Aumentar recuo','.ql-align':'Alinhamento',
   '.ql-blockquote':'Citação','.ql-code-block':'Bloco de código','.ql-link':'Link','.ql-image':'Imagem','.ql-clean':'Limpar formatação'
 };
+const CAD_CSS_JANELA = `
+  html,body{margin:0;height:100%}
+  body{font-family:system-ui,sans-serif;background:#e5e7eb;display:flex;flex-direction:column}
+  #topo{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;background:#fff;border-bottom:1px solid #e5e7eb}
+  #mat{font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.04em}
+  #tit{font-size:16px;font-weight:700;color:#111827;word-break:break-word}
+  #status{font-size:12px;color:#9ca3af;flex-shrink:0;text-align:right}
+  #wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+  .ql-toolbar.ql-snow{background:#f9fafb;border:none;border-bottom:1px solid #e5e7eb}
+  .ql-container.ql-snow{flex:1;overflow:auto;border:none}
+  .ql-editor{background:#fff;max-width:820px;min-height:100%;box-sizing:border-box;margin:0 auto;padding:28px 36px;font-size:15px;line-height:1.6;box-shadow:0 0 0 1px #e5e7eb}
+  .ql-editor h1{font-size:1.9em}.ql-editor h2{font-size:1.45em}.ql-editor h3{font-size:1.2em}
+  .ql-marcatexto{width:32px!important}
+`;
 
 function cad(){ return e.caderno ||= {materias:[]}; }
 function cadAcharTopico(id){
@@ -1438,58 +1456,74 @@ function cadAcharTopico(id){
 }
 function cadDocRef(id){ return doc(db,'cronogramas',userId,'caderno',id); }
 function cadNovoId(p){ return p+Date.now()+Math.random().toString(36).substr(2,4); }
+function cadCorCapa(m){ return m.cor || CAD_CORES_CAPA[cad().materias.indexOf(m) % CAD_CORES_CAPA.length]; }
 
 function renderCaderno(c){
   const mats = cad().materias;
-  const atual = cadSel && cadAcharTopico(cadSel);
-  if(!atual) cadSel = null;
+  const aberta = mats.find(m=>m.id===cadMatAberta);
+  if(!aberta) cadMatAberta = null;
+  const aviso = window.documentPictureInPicture
+    ? 'Cada tópico abre numa página solta que fica sempre na frente — dá para mover e redimensionar.'
+    : 'Cada tópico abre numa janela separada. (No Chrome ou Edge ela fica sempre na frente.)';
+
+  if(aberta){
+    const cor = cadCorCapa(aberta);
+    return `
+<div class="flex items-center gap-3 mb-5 flex-wrap">
+  <button onclick="cadVoltar()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold">← Cadernos</button>
+  <h2 class="text-2xl font-bold flex-1 break-words" style="color:${cor}">📓 ${escHtml(aberta.nome)}</h2>
+  <button onclick="cadRenomear('${aberta.id}')" class="text-sm text-gray-500 hover:text-gray-800">✏️ Renomear</button>
+  <button onclick="cadExcluir('${aberta.id}')" class="text-sm text-red-500 hover:text-red-700">🗑️ Excluir caderno</button>
+</div>
+<p class="text-gray-500 text-sm mb-4">${aviso}</p>
+<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+  <button onclick="cadAddTopico('${aberta.id}')" class="border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 rounded-xl p-6 text-gray-500 hover:text-indigo-700 font-bold min-h-[130px]">+ Novo tópico</button>
+  ${aberta.topicos.map(t=>{
+    const naJanela = cadQuillTopico===t.id && cadJanela && !cadJanela.closed;
+    return `<div class="relative rounded-xl border ${naJanela?'border-indigo-400 ring-2 ring-indigo-200':'border-gray-200'} shadow-sm hover:shadow-lg transition-all min-h-[130px] overflow-hidden"
+      style="background:repeating-linear-gradient(#fff 0 27px,#dbeafe 27px 28px);border-left:4px solid ${cor}">
+      <button onclick="cadAbrirTopico('${t.id}')" class="absolute inset-0 text-left p-4 pr-16">
+        <p class="font-bold text-gray-800 break-words bg-white/80 inline">📄 ${escHtml(t.nome)}</p>
+        ${naJanela?'<p class="text-xs text-indigo-600 font-bold mt-2 bg-white/80 inline-block">● aberto na página solta</p>':''}
+        ${t.criado?`<p class="absolute bottom-3 left-4 text-xs text-gray-400 bg-white/80">criado em ${fmtDMY(new Date(t.criado))}</p>`:''}
+      </button>
+      <div class="absolute top-2 right-2 flex gap-1">
+        <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs bg-white/90 hover:bg-gray-100 rounded px-1.5 py-1">✏️</button>
+        <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs bg-white/90 hover:bg-red-50 rounded px-1.5 py-1">🗑️</button>
+      </div>
+    </div>`;
+  }).join('')}
+</div>`;
+  }
+
   const sugestoes = c.cron.map(x=>x.ma).filter(n=>!mats.some(m=>m.nome===n));
   return `
-<h2 class="text-2xl font-bold mb-1">📓 Caderno</h2>
-<p class="text-gray-500 text-sm mb-5">Seu caderno digital: separe por matéria e, dentro dela, por tópico. Salva sozinho enquanto você escreve.</p>
-<div class="grid md:grid-cols-[270px_1fr] gap-5">
-  <aside class="bg-gray-50 rounded-xl p-3 self-start md:sticky md:top-4">
-    <div class="flex gap-2 mb-3">
-      <button onclick="cadAddMateria()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold">+ Matéria</button>
-      ${sugestoes.length?`<button onclick="cadImportarMaterias()" title="Criar no caderno as matérias do plano atual" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-2 rounded-lg text-xs font-bold">⤵ Do plano (${sugestoes.length})</button>`:''}
-    </div>
-    ${mats.length===0?'<p class="text-xs text-gray-400 text-center py-6">Nenhuma matéria no caderno ainda.</p>':mats.map(m=>{
-      const aberta = cadAbertas[m.id] || (atual && atual.m.id===m.id);
-      return `<div class="mb-1">
-        <div class="flex items-center gap-1 group">
-          <button onclick="cadToggleMateria('${m.id}')" class="flex-1 text-left px-2 py-1.5 rounded-lg hover:bg-gray-200 font-bold text-sm text-gray-800 break-words">${aberta?'▾':'▸'} 📚 ${escHtml(m.nome)} <span class="text-xs text-gray-400 font-normal">(${m.topicos.length})</span></button>
-          <button onclick="cadRenomear('${m.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
-          <button onclick="cadExcluir('${m.id}')" title="Excluir matéria" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
-        </div>
-        ${aberta?`<div class="ml-4 border-l-2 border-gray-200 pl-2 mt-1 space-y-0.5">
-          ${m.topicos.map(t=>`<div class="flex items-center gap-1">
-            <button onclick="cadSelecionar('${t.id}')" class="flex-1 text-left px-2 py-1 rounded text-sm break-words ${t.id===cadSel?'bg-indigo-100 text-indigo-800 font-bold':'text-gray-700 hover:bg-gray-200'}">📄 ${escHtml(t.nome)}</button>
-            <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
-            <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
-          </div>`).join('')}
-          <button onclick="cadAddTopico('${m.id}')" class="text-xs text-indigo-600 hover:underline font-bold px-2 py-1">+ Tópico</button>
-        </div>`:''}
-      </div>`;
-    }).join('')}
-  </aside>
-  <section class="min-w-0">
-    ${atual?`
-    <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
-      <p class="text-sm text-gray-500 break-words"><b class="text-gray-700">${escHtml(atual.m.nome)}</b> › ${escHtml(atual.t.nome)}</p>
-      <span id="cad-status" class="text-xs text-gray-400"></span>
-    </div>
-    <div id="cad-editor"></div>`:`
-    <div class="text-center py-20 bg-gray-50 rounded-xl text-gray-400">
-      <div class="text-5xl mb-3">📓</div>
-      <p>${mats.length?'Escolha um tópico na lateral ou crie um novo com "+ Tópico".':'Comece criando uma matéria com "+ Matéria".'}</p>
-    </div>`}
-  </section>
+<div class="flex items-center gap-3 mb-1 flex-wrap">
+  <h2 class="text-2xl font-bold flex-1">📓 Meus cadernos</h2>
+  ${sugestoes.length?`<button onclick="cadImportarMaterias()" title="Criar um caderno para cada matéria do plano atual" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-2 rounded-lg text-sm font-bold">⤵ Criar das matérias do plano (${sugestoes.length})</button>`:''}
+</div>
+<p class="text-gray-500 text-sm mb-6">Um caderno por matéria. Clique num caderno para ver os tópicos. ${aviso}</p>
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-5">
+  ${mats.map(m=>{
+    const cor = cadCorCapa(m);
+    return `<button onclick="cadAbrirMateria('${m.id}')" class="group relative aspect-[3/4] rounded-r-2xl rounded-l-md shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all text-left overflow-hidden"
+      style="background:linear-gradient(135deg,${cor},${cor}cc)">
+      <div class="absolute left-0 top-0 bottom-0 w-4" style="background:repeating-linear-gradient(transparent 0 10px,rgba(255,255,255,.55) 10px 14px,transparent 14px 22px);border-right:2px solid rgba(0,0,0,.15)"></div>
+      <div class="absolute left-7 right-3 top-6 bg-white rounded-md shadow p-2">
+        <p class="font-bold text-gray-800 text-sm leading-snug break-words">${escHtml(m.nome)}</p>
+      </div>
+      <p class="absolute left-7 bottom-3 text-white/90 text-xs font-bold">${m.topicos.length} ${m.topicos.length===1?'tópico':'tópicos'}</p>
+    </button>`;
+  }).join('')}
+  <button onclick="cadAddMateria()" class="aspect-[3/4] rounded-2xl border-2 border-dashed border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 text-gray-500 hover:text-indigo-700 font-bold">+ Novo caderno</button>
 </div>`;
 }
 
 function cadStatus(txt, cor='text-gray-400'){
-  const el = document.getElementById('cad-status');
-  if(el){ el.className = 'text-xs '+cor; el.textContent = txt; }
+  const el = cadJanela && !cadJanela.closed && cadJanela.document.getElementById('status');
+  if(!el) return;
+  el.style.color = {'text-gray-400':'#9ca3af','text-green-600':'#16a34a','text-red-600':'#dc2626','text-amber-600':'#d97706'}[cor] || cor;
+  el.textContent = txt;
 }
 
 // Reduz a imagem (máx. 1400px, JPEG) antes de colocar no caderno, para a página não ficar pesada
@@ -1510,25 +1544,76 @@ function cadComprimirImagem(file){
     img.src = URL.createObjectURL(file);
   });
 }
-async function cadInserirImagens(range, files){
+async function cadInserirImagens(q, range, files){
   for(const f of files){
     if(!/^image\//.test(f.type)) continue;
     try{
       const url = await cadComprimirImagem(f);
-      cadQuill.insertEmbed(range.index, 'image', url, 'user');
+      q.insertEmbed(range.index, 'image', url, 'user');
       range = {index: range.index+1, length:0};
     }catch{ ntf('❌ Não foi possível ler a imagem','er'); }
   }
-  cadQuill.setSelection(range.index, 0, 'silent');
+  q.setSelection(range.index, 0, 'silent');
 }
 
-async function montarEditorCaderno(){
-  cadSincronizarPendentes();
-  const el = document.getElementById('cad-editor');
-  if(!el || !cadSel) return;
-  if(!window.Quill){ el.innerHTML = '<p class="p-4 text-red-600 text-sm">❌ Não foi possível carregar o editor. Verifique a internet e recarregue a página.</p>'; return; }
-  const topico = cadSel;
-  const q = new Quill(el, {
+// Abre (ou reaproveita) a página solta. Precisa ser chamada direto do clique: o navegador só
+// deixa abrir a janela "sempre na frente" em resposta a um clique do usuário.
+async function cadAbrirTopico(id){
+  if(!cadAcharTopico(id)) return;
+  let win = cadJanela && !cadJanela.closed ? cadJanela : null;
+  if(!win){
+    try{
+      if(window.documentPictureInPicture) win = await documentPictureInPicture.requestWindow({width:680, height:820});
+    }catch(err){ console.warn('Página solta (PiP) indisponível:', err); win = null; }
+    if(!win){
+      win = window.open('', 'caderno-pagina', 'popup=yes,width=680,height=820');
+      if(!win){ ntf('❌ O navegador bloqueou a janela. Permita pop-ups para este site.','er'); return; }
+    }
+    cadJanela = win;
+    try{ await cadPrepararJanela(win); }
+    catch{ ntf('❌ Não foi possível carregar o editor. Verifique a internet.','er'); return; }
+    win.addEventListener('pagehide', ()=>{
+      if(cadJanela!==win) return;
+      cadGuardarEditor();
+      if(cadPendente) cadSalvarAgora();
+      cadJanela = null; cadQuill = null; cadQuillTopico = null;
+      rend();
+    });
+  } else {
+    try{ win.focus(); }catch{}
+  }
+  await cadCarregarNaJanela(win, id);
+}
+
+async function cadPrepararJanela(win){
+  const d = win.document;
+  d.head.innerHTML = `<meta charset="utf-8"><link rel="stylesheet" href="${QUILL_CSS}"><style>${CAD_CSS_JANELA}</style>`;
+  d.body.innerHTML = `<div id="topo"><div><div id="mat"></div><div id="tit"></div></div><span id="status"></span></div><div id="wrap"></div>`;
+  if(!win.Quill){
+    // o Quill precisa rodar dentro da própria janela (ele usa o "document" dela)
+    await new Promise((ok, falha)=>{
+      const s = d.createElement('script');
+      s.src = QUILL_JS; s.onload = ok; s.onerror = falha;
+      d.head.appendChild(s);
+    });
+  }
+}
+
+async function cadCarregarNaJanela(win, topico){
+  cadGuardarEditor();
+  if(cadPendente) cadSalvarAgora();
+  const achado = cadAcharTopico(topico);
+  if(!achado) return;
+  const d = win.document;
+  d.title = `${achado.t.nome} — ${achado.m.nome}`;
+  d.getElementById('mat').textContent = '📓 '+achado.m.nome;
+  d.getElementById('mat').style.color = cadCorCapa(achado.m);
+  d.getElementById('tit').textContent = achado.t.nome;
+  d.getElementById('status').textContent = '';
+  const wrap = d.getElementById('wrap');
+  wrap.innerHTML = '<div id="editor"></div>';
+
+  const q = new win.Quill(d.getElementById('editor'), {
     theme:'snow',
     placeholder:'Escreva aqui seu conteúdo...',
     modules:{
@@ -1543,24 +1628,25 @@ async function montarEditorCaderno(){
           marcatexto(){
             const r = q.getSelection(true);
             if(!r) return;
-            const atual = q.getFormat(r).background;
-            q.format('background', atual ? false : CAD_MARCA_PADRAO, 'user');
+            q.format('background', q.getFormat(r).background ? false : CAD_MARCA_PADRAO, 'user');
           },
           image(){
-          const inp = document.createElement('input');
-          inp.type='file'; inp.accept='image/*'; inp.multiple=true;
-          inp.onchange = () => cadInserirImagens(q.getSelection(true), [...inp.files]);
-          inp.click();
-        }}
+            const inp = d.createElement('input');
+            inp.type='file'; inp.accept='image/*'; inp.multiple=true;
+            inp.onchange = () => cadInserirImagens(q, q.getSelection(true), [...inp.files]);
+            inp.click();
+          }
+        }
       },
-      uploader:{ handler(range, files){ cadInserirImagens(range, files); } }
+      uploader:{ handler(range, files){ cadInserirImagens(q, range, files); } }
     }
   });
   cadQuill = q; cadQuillTopico = topico;
   const barra = q.getModule('toolbar').container;
   const btnMarca = barra.querySelector('.ql-marcatexto');
-  if(btnMarca){ btnMarca.innerHTML = '🖍️'; btnMarca.style.width = '32px'; }
+  if(btnMarca) btnMarca.textContent = '🖍️';
   Object.entries(CAD_DICAS).forEach(([sel,dica])=>barra.querySelectorAll(sel).forEach(b=>b.title=dica));
+  rend(); // marca na tela principal qual tópico está aberto
 
   let html = cadCache[topico];
   if(html===undefined){
@@ -1577,17 +1663,18 @@ async function montarEditorCaderno(){
     const local = localStorage.getItem('cad_'+topico);
     if(local!==null && (cadPendentesLocais().includes(topico) || !html)) html = local;
     cadCache[topico] = html;
-    if(cadQuill!==q) return; // usuário trocou de página enquanto carregava
+    if(cadQuill!==q) return; // trocou de tópico enquanto carregava
     q.enable();
-    if(document.getElementById('cad-status')?.textContent==='Carregando...') cadStatus('');
+    if(d.getElementById('status').textContent==='Carregando...') cadStatus('');
   }
   q.clipboard.dangerouslyPasteHTML(html||'', 'silent');
   q.history.clear();
-  q.on('text-change', (d, old, source)=>{
+  q.on('text-change', (delta, old, source)=>{
     if(source!=='user') return;
     cadCache[topico] = q.root.innerHTML;
     cadAgendarSalvar(topico);
   });
+  q.focus();
 }
 
 // Páginas que não conseguiram ir para a nuvem (ficam no localStorage até sincronizar)
@@ -1644,28 +1731,22 @@ async function cadSalvarAgora(){
   }catch(err){
     console.error('Erro ao salvar caderno:', err);
     cadMarcarPendente(topico, true);
-    cadStatus(err?.code==='permission-denied'
+    if(cadQuillTopico===topico) cadStatus(err?.code==='permission-denied'
       ? '⚠️ O Firebase bloqueou o salvamento (regras). Guardado só neste navegador.'
       : '⚠️ Erro ao salvar na nuvem. Guardado neste navegador; tento de novo ao editar.', 'text-red-600');
   }
 }
-function guardarEditorCaderno(){
+function cadGuardarEditor(){
   // só guarda se a página já terminou de carregar (editor habilitado), senão apagaria o conteúdo
-  if(cadQuill && cadQuillTopico && cadQuill.isEnabled()) cadCache[cadQuillTopico] = cadQuill.root.innerHTML;
-  cadQuill = null; cadQuillTopico = null;
+  try{ if(cadQuill && cadQuillTopico && cadQuill.isEnabled()) cadCache[cadQuillTopico] = cadQuill.root.innerHTML; }catch{}
 }
 
-function cadToggleMateria(id){ cadAbertas[id] = !cadAbertas[id]; rend(); }
-function cadSelecionar(id){
-  if(cadPendente) cadSalvarAgora();
-  cadSel = id; rend();
-}
+function cadAbrirMateria(id){ cadMatAberta = id; rend(); }
+function cadVoltar(){ cadMatAberta = null; rend(); }
 function cadAddMateria(){
-  const nome = (prompt('Nome da matéria:')||'').trim();
+  const nome = (prompt('Nome do caderno (matéria):')||'').trim();
   if(!nome) return;
-  const m = {id:cadNovoId('cm'), nome, topicos:[]};
-  cad().materias.push(m);
-  cadAbertas[m.id] = true;
+  cad().materias.push({id:cadNovoId('cm'), nome, topicos:[]});
   sv(); rend();
 }
 function cadImportarMaterias(){
@@ -1673,7 +1754,7 @@ function cadImportarMaterias(){
   const novas = c.cron.map(x=>x.ma).filter(n=>!cad().materias.some(m=>m.nome===n));
   novas.forEach(nome=>cad().materias.push({id:cadNovoId('cm'), nome, topicos:[]}));
   sv(); rend();
-  ntf(`📚 ${novas.length} matéria(s) adicionada(s) ao caderno`);
+  ntf(`📚 ${novas.length} caderno(s) criado(s)`);
 }
 function cadAddTopico(materiaId){
   const m = cad().materias.find(x=>x.id===materiaId);
@@ -1683,10 +1764,8 @@ function cadAddTopico(materiaId){
   const t = {id:cadNovoId('ct'), nome, criado:new Date().toISOString()};
   m.topicos.push(t);
   cadCache[t.id] = '';
-  cadAbertas[m.id] = true;
-  if(cadPendente) cadSalvarAgora();
-  cadSel = t.id;
   sv(); rend();
+  ntf('📄 Tópico criado! Clique nele para abrir a página.');
 }
 function cadRenomear(id){
   const m = cad().materias.find(x=>x.id===id);
@@ -1695,6 +1774,14 @@ function cadRenomear(id){
   const nome = (prompt('Novo nome:', alvo.nome)||'').trim();
   if(!nome) return;
   alvo.nome = nome; sv(); rend();
+  // atualiza o cabeçalho da página solta, se for ela
+  const aberto = cadQuillTopico && cadAcharTopico(cadQuillTopico);
+  if(aberto && cadJanela && !cadJanela.closed && (aberto.t===alvo || aberto.m===alvo)){
+    const d = cadJanela.document;
+    d.getElementById('mat').textContent = '📓 '+aberto.m.nome;
+    d.getElementById('tit').textContent = aberto.t.nome;
+    d.title = `${aberto.t.nome} — ${aberto.m.nome}`;
+  }
 }
 async function cadExcluir(id){
   const m = cad().materias.find(x=>x.id===id);
@@ -1702,21 +1789,24 @@ async function cadExcluir(id){
   const topicos = m ? m.topicos : (achado ? [achado.t] : []);
   if(!m && !achado) return;
   const msg = m
-    ? `Excluir a matéria "${m.nome}" e ${topicos.length?`TODOS os ${topicos.length} tópicos dela`:'ela'} do caderno? Isso não pode ser desfeito.`
+    ? `Excluir o caderno "${m.nome}" e ${topicos.length?`TODOS os ${topicos.length} tópicos dele`:'ele'}? Isso não pode ser desfeito.`
     : `Excluir o tópico "${achado.t.nome}"? Isso não pode ser desfeito.`;
   if(!confirm(msg)) return;
-  if(m) cad().materias = cad().materias.filter(x=>x.id!==id);
+  if(m){ cad().materias = cad().materias.filter(x=>x.id!==id); cadMatAberta = null; }
   else achado.m.topicos = achado.m.topicos.filter(x=>x.id!==id);
   topicos.forEach(t=>{
-    if(cadSel===t.id){ cadSel=null; cadQuill=null; cadQuillTopico=null; }
     if(cadPendente===t.id) cadPendente=null;
+    if(cadQuillTopico===t.id){
+      cadQuill=null; cadQuillTopico=null;
+      if(cadJanela && !cadJanela.closed) cadJanela.close();
+    }
     delete cadCache[t.id];
     try{ localStorage.removeItem('cad_'+t.id); }catch{}
     deleteDoc(cadDocRef(t.id)).catch(err=>console.error('Erro ao excluir página:',err));
   });
   sv(); rend();
 }
-window.addEventListener('beforeunload', ()=>{ if(cadPendente) cadSalvarAgora(); });
+window.addEventListener('beforeunload', ()=>{ cadGuardarEditor(); if(cadPendente) cadSalvarAgora(); });
 
 function delQuestao(id){
   if(!confirm('Remover este registro?')) return;
@@ -2228,7 +2318,6 @@ window.authGoogle = authGoogle;
 window.authEsqueci = authEsqueci;
 
 function rend(){
-  guardarEditorCaderno(); // o editor é recriado a cada render; guarda o texto antes
   // Ao abrir o app ou virar o dia: revisões e aulas da agenda atrasadas vão para hoje
   let ajustou = ajustarTodasSequencias();
   (e.cronogramas||[]).forEach(cr=>{ if(rolarAgendaAtrasada(cr)) ajustou = true; });
@@ -2674,7 +2763,7 @@ ${svgChartPomodoros(14)}
 `:''}
 
 </div>`;
-  if(e.aba==='caderno') montarEditorCaderno();
+  if(e.aba==='caderno') cadSincronizarPendentes();
 
   window.novoCronograma = novoCronograma;
   window.renomearCronograma = renomearCronograma;
@@ -2711,10 +2800,11 @@ ${svgChartPomodoros(14)}
   window.cadAddMateria = cadAddMateria;
   window.cadImportarMaterias = cadImportarMaterias;
   window.cadAddTopico = cadAddTopico;
-  window.cadSelecionar = cadSelecionar;
+  window.cadAbrirTopico = cadAbrirTopico;
+  window.cadAbrirMateria = cadAbrirMateria;
+  window.cadVoltar = cadVoltar;
   window.cadRenomear = cadRenomear;
   window.cadExcluir = cadExcluir;
-  window.cadToggleMateria = cadToggleMateria;
   window.addMaterial = addMaterial;
   window.abrirMaterial = abrirMaterial;
   window.delMaterial = delMaterial;
