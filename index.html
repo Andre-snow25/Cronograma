@@ -1419,6 +1419,17 @@ let cadAbertas = {};          // matérias expandidas na lateral
 const cadCache = {};          // topicoId -> html já carregado/editado
 let cadSalvarTimer = null, cadPendente = null;
 const CAD_LIMITE = 900*1024;
+const CAD_CORES_TEXTO = ['#000000','#4b5563','#9ca3af','#dc2626','#ea580c','#ca8a04','#16a34a','#0d9488','#2563eb','#1e3a8a','#7c3aed','#db2777','#92400e','#ffffff'];
+const CAD_CORES_MARCA = [false,'#fff176','#ffd54f','#b9f6ca','#b3e5fc','#f8bbd0','#ffe0b2','#e1bee7','#e5e7eb'];
+const CAD_MARCA_PADRAO = '#fff176';
+const CAD_DICAS = {
+  '.ql-header':'Título','.ql-size':'Tamanho da letra','.ql-bold':'Negrito (Ctrl+B)','.ql-italic':'Itálico (Ctrl+I)',
+  '.ql-underline':'Sublinhado (Ctrl+U)','.ql-strike':'Riscado','.ql-color':'Cor da letra','.ql-background':'Cor do marca-texto',
+  '.ql-marcatexto':'Marca-texto amarelo (clique de novo para tirar)','.ql-list[value="ordered"]':'Lista numerada',
+  '.ql-list[value="bullet"]':'Lista com marcadores','.ql-list[value="check"]':'Lista de tarefas',
+  '.ql-indent[value="-1"]':'Diminuir recuo','.ql-indent[value="+1"]':'Aumentar recuo','.ql-align':'Alinhamento',
+  '.ql-blockquote':'Citação','.ql-code-block':'Bloco de código','.ql-link':'Link','.ql-image':'Imagem','.ql-clean':'Limpar formatação'
+};
 
 function cad(){ return e.caderno ||= {materias:[]}; }
 function cadAcharTopico(id){
@@ -1523,11 +1534,18 @@ async function montarEditorCaderno(){
       toolbar:{
         container:[
           [{header:[1,2,3,false]}], [{size:['small',false,'large','huge']}],
-          ['bold','italic','underline','strike'], [{color:[]},{background:[]}],
+          ['bold','italic','underline','strike'], [{color:CAD_CORES_TEXTO}, 'marcatexto', {background:CAD_CORES_MARCA}],
           [{list:'ordered'},{list:'bullet'},{list:'check'}], [{indent:'-1'},{indent:'+1'}], [{align:[]}],
           ['blockquote','code-block','link','image'], ['clean']
         ],
-        handlers:{ image(){
+        handlers:{
+          marcatexto(){
+            const r = q.getSelection(true);
+            if(!r) return;
+            const atual = q.getFormat(r).background;
+            q.format('background', atual ? false : CAD_MARCA_PADRAO, 'user');
+          },
+          image(){
           const inp = document.createElement('input');
           inp.type='file'; inp.accept='image/*'; inp.multiple=true;
           inp.onchange = () => cadInserirImagens(q.getSelection(true), [...inp.files]);
@@ -1538,6 +1556,10 @@ async function montarEditorCaderno(){
     }
   });
   cadQuill = q; cadQuillTopico = topico;
+  const barra = q.getModule('toolbar').container;
+  const btnMarca = barra.querySelector('.ql-marcatexto');
+  if(btnMarca){ btnMarca.innerHTML = '🖍️'; btnMarca.style.width = '32px'; }
+  Object.entries(CAD_DICAS).forEach(([sel,dica])=>barra.querySelectorAll(sel).forEach(b=>b.title=dica));
 
   let html = cadCache[topico];
   if(html===undefined){
