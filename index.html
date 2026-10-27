@@ -1755,9 +1755,11 @@ function cadAplicarTema(win, tema){
   d.body.dataset.tema = tema;
   const sel = d.getElementById('tema'); if(sel) sel.value = tema;
   const fr = d.querySelector('#wrap iframe');
-  if(fr) fr.style.filter = CAD_TEMAS[tema].filtro || '';
+  // a página segue o tema claro/escuro do sistema; força claro para o fundo depender só deste seletor
+  if(fr){ fr.style.colorScheme = 'light'; fr.style.filter = CAD_TEMAS[tema].filtro || ''; }
 }
 const CAD_CSS_JANELA = `
+  :root{color-scheme:light}
   html,body{margin:0;height:100%}
   body{--fundo:#e5e7eb;--papel:#fffef8;--pauta:#bfdbfe;--margem:#f87171;--tinta:#111827;--barra:#f9fafb;--topo:#fff;--borda:#e5e7eb;--icone:#444;--tabela:#fff;--cab-tabela:#eef2ff}
   body[data-tema="branco"]{--papel:#fff;--pauta:transparent;--margem:transparent}
@@ -2322,6 +2324,7 @@ async function cadExportar(materiaId, formato, topicoId){
 // Os grifos são guardados como posições no texto da página (início/fim), por isso continuam
 // no lugar certo mesmo que a janela mude de tamanho.
 function cadAnotRuntime(DADOS){
+  document.documentElement.setAttribute('data-theme','light'); // páginas do Claude escurecem sozinhas no modo escuro do sistema
   const st = {hl: DADOS.hl || [], notas: DADOS.notas || []};
   const CORES = {amarelo:'#fff176', verde:'#b9f6ca', azul:'#b3e5fc', rosa:'#f8bbd0'};
   const UI = 'data-anot-ui';
