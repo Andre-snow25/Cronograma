@@ -1800,6 +1800,7 @@ function renderCaderno(c){
 </div>
 <div class="flex flex-wrap items-center gap-2 mb-4">
   <button onclick="cadAddTopico('${aberta.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ Novo tópico</button>
+  <button onclick="cadImportarPagina('${aberta.id}')" title="Guardar no caderno uma página pronta (ex.: resumo/artifact do Claude) exatamente como ela é" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-4 py-2 rounded-lg text-sm font-bold">📥 Importar página do Claude</button>
   ${aberta.topicos.length?`<span class="text-gray-300">|</span>
   <span class="text-sm text-gray-500 font-bold">Exportar caderno:</span>
   <button onclick="cadExportar('${aberta.id}','word')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-3 py-2 rounded-lg text-sm font-bold">📝 Word</button>
@@ -1813,11 +1814,13 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
     return `<li class="flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-gray-50'}">
       <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${i+1}.</span>
       <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
-        <span class="font-semibold text-gray-800 break-words">📄 ${escHtml(t.nome)}</span>
+        <span class="font-semibold text-gray-800 break-words">${t.tipo==='html'?'🎨':'📄'} ${escHtml(t.nome)}</span>${t.tipo==='html'?'<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-bold">página importada</span>':''}
         ${naJanela?'<span class="ml-2 text-xs text-indigo-600 font-bold">● aberto na página solta</span>':''}
       </button>
       ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
-      <button onclick="cadExportar('${aberta.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>
+      ${t.tipo==='html'
+        ? `<button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
+        : `<button onclick="cadExportar('${aberta.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>`}
       <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
       <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
     </li>`;
@@ -1989,6 +1992,24 @@ async function cadCarregarNaJanela(win, topico){
   d.getElementById('tit').textContent = achado.t.nome;
   d.getElementById('status').textContent = '';
   const wrap = d.getElementById('wrap');
+
+  if(achado.t.tipo==='html'){
+    // Página importada (ex.: artifact do Claude): mostrada como está, num iframe isolado
+    // (sandbox sem allow-same-origin: os scripts dela rodam, mas não acessam o app).
+    cadQuill = null; cadQuillTopico = topico;
+    wrap.innerHTML = '<p style="padding:12px;color:#9ca3af;font-size:13px">Carregando...</p>';
+    rend();
+    const html = await cadObterHtml(topico);
+    if(cadQuillTopico!==topico || cadJanela!==win) return;
+    wrap.innerHTML = '';
+    const fr = d.createElement('iframe');
+    fr.setAttribute('sandbox','allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    fr.style.cssText = 'flex:1;width:100%;border:0;background:#fff';
+    fr.srcdoc = html || '<p style="font-family:system-ui;padding:16px;color:#888">Página vazia.</p>';
+    wrap.appendChild(fr);
+    cadStatus('🎨 Página importada (somente leitura)');
+    return;
+  }
   wrap.innerHTML = '<div id="editor"></div>';
 
   // As opções são recriadas DENTRO da janela (win.JSON): o Quill de lá testa
@@ -2220,6 +2241,10 @@ async function cadExportar(materiaId, formato, topicoId){
   ntf('⏳ Preparando o caderno...');
   const partes = [];
   for(const [i,t] of topicos.entries()){
+    if(t.tipo==='html'){
+      partes.push(`<div class="${i>0?'quebra':''}"><h1 class="cad-topico">${escHtml(t.nome)}</h1><p><i>(Página importada — abra no cronograma ou use o botão ⬇ para baixar o .html.)</i></p></div>`);
+      continue;
+    }
     const html = cadHtmlSemantico(await cadObterHtml(t.id));
     partes.push(`<div class="${i>0?'quebra':''}"><h1 class="cad-topico">${escHtml(t.nome)}</h1>${html||'<p><i>(página em branco)</i></p>'}</div>`);
   }
@@ -2247,6 +2272,77 @@ async function cadExportar(materiaId, formato, topicoId){
 <body>${corpo}<script>window.onload=()=>setTimeout(()=>window.print(),300)<\/script></body></html>`);
     janela.document.close();
   }
+}
+
+// Importa uma página pronta (HTML) como tópico do caderno, para não perder o visual ao colar
+function cadImportarPagina(materiaId){
+  const m = cad().materias.find(x=>x.id===materiaId);
+  if(!m) return;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:680px;max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold mb-1">📥 Importar página do Claude</h3>
+        <p class="text-sm text-gray-500 mb-3">Para resumos com visual próprio (cores, cartões, quadros). A página fica no caderno <b>${escHtml(m.nome)}</b> exatamente como no Claude.</p>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 mb-4 space-y-1">
+          <p><b>Como pegar a página no Claude:</b></p>
+          <p>• No artifact, abra o menu (⋯ ou o botão de download) e escolha <b>baixar</b> o arquivo <b>.html</b> — depois envie aqui em "Carregar arquivo"; <b>ou</b></p>
+          <p>• Abra a visualização de <b>código</b> do artifact, copie tudo (Ctrl+A, Ctrl+C) e cole na caixa abaixo.</p>
+        </div>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do tópico</label>
+        <input id="imp-nome" placeholder="Ex: Concordância Nominal – Aula 1" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Código da página (HTML)</label>
+        <textarea id="imp-html" rows="9" placeholder="<!doctype html> ... cole aqui o código" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs font-mono mb-1 focus:border-indigo-500 focus:outline-none"></textarea>
+        <label class="text-xs text-indigo-700 font-semibold cursor-pointer hover:underline">📎 ou carregar arquivo .html
+          <input id="imp-arquivo" type="file" accept=".html,.htm,text/html" class="hidden">
+        </label>
+        <div class="flex gap-3 mt-5">
+          <button id="imp-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="imp-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Importar</button>
+        </div>
+      </div>
+    </div>`;
+  const nomeEl = document.getElementById('imp-nome');
+  const htmlEl = document.getElementById('imp-html');
+  const sugerirNome = html => {
+    if(nomeEl.value.trim()) return;
+    const t = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
+    if(t && t[1].trim()) nomeEl.value = t[1].trim();
+  };
+  htmlEl.addEventListener('input', ()=>sugerirNome(htmlEl.value));
+  document.getElementById('imp-arquivo').onchange = async ev => {
+    const f = ev.target.files[0];
+    if(!f) return;
+    htmlEl.value = await f.text();
+    sugerirNome(htmlEl.value);
+    if(!nomeEl.value.trim()) nomeEl.value = f.name.replace(/\.[^.]+$/,'');
+  };
+  document.getElementById('imp-cancelar').onclick = () => { document.getElementById('modal-root').innerHTML=''; };
+  document.getElementById('imp-salvar').onclick = () => {
+    const nome = nomeEl.value.trim();
+    const html = htmlEl.value.trim();
+    if(!nome){ntf('❌ Dê um nome ao tópico','er');return;}
+    if(!html){ntf('❌ Cole o código da página ou carregue o arquivo','er');return;}
+    if(!/<[a-z!]/i.test(html)){ntf('❌ Isso não parece código HTML. Copie o código do artifact (não o texto da página).','er');return;}
+    if(html.length > CAD_LIMITE){ntf('❌ Página grande demais para guardar (máx. ~900 KB).','er');return;}
+    const t = {id:cadNovoId('ct'), nome, tipo:'html', criado:new Date().toISOString()};
+    m.topicos.push(t);
+    cadCache[t.id] = html;
+    cadPendente = t.id;
+    cadSalvarAgora();
+    document.getElementById('modal-root').innerHTML='';
+    sv(); rend();
+    ntf('🎨 Página importada! Clique nela para abrir.');
+  };
+}
+async function cadBaixarPagina(id){
+  const achado = cadAcharTopico(id);
+  if(!achado) return;
+  const html = await cadObterHtml(id);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([html], {type:'text/html'}));
+  a.download = achado.t.nome.replace(/[\\/:*?"<>|]+/g,'-').slice(0,120) + '.html';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
 
 function cadAbrirMateria(id){ cadMatAberta = id; rend(); }
@@ -3323,6 +3419,8 @@ ${svgChartPomodoros(14)}
   window.cadVoltar = cadVoltar;
   window.cadFiltrar = cadFiltrar;
   window.cadExportar = cadExportar;
+  window.cadImportarPagina = cadImportarPagina;
+  window.cadBaixarPagina = cadBaixarPagina;
   window.cadRenomear = cadRenomear;
   window.cadExcluir = cadExcluir;
   window.addMaterial = addMaterial;
