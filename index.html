@@ -2832,6 +2832,8 @@ function rend(){
   if(ajustou) sv();
   const c = currentC();
   const pd=c.revs.filter(x=>x.s==='p').length;
+  // selo da aba: só as revisões de hoje (as atrasadas já foram passadas para hoje)
+  const pdHoje=c.revs.filter(x=>x.s==='p' && dmyParaISO(x.dr)<=hojeISO()).length;
   const doPlano = c.cron.filter(x=>!x.extra);
   const extras = c.cron.filter(x=>x.extra);
   const ta=doPlano.reduce((s,m)=>s+m.aulasTotal,0);
@@ -2877,7 +2879,7 @@ function rend(){
 <button onclick="e.aba='plano';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='plano'?'tab-active':'text-gray-600 hover:text-gray-800'}">📋 Plano</button>
 <button onclick="e.aba='agenda';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='agenda'?'tab-active':'text-gray-600 hover:text-gray-800'}">🗓️ Agenda</button>
 <button onclick="e.aba='rotina';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='rotina'?'tab-active':'text-gray-600 hover:text-gray-800'}">📆 Rotina Semanal</button>
-<button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pd>0?`<span class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center animate-pulse">${pd}</span>`:''}</button>
+<button onclick="e.aba='revs';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='revs'?'tab-active':'text-gray-600 hover:text-gray-800'}">🔄 Revisões${pdHoje>0?`<span title="Revisões para hoje" class="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full min-w-6 h-6 px-1.5 flex items-center justify-center animate-pulse">${pdHoje}</span>`:''}</button>
 <button onclick="e.aba='questoes';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='questoes'?'tab-active':'text-gray-600 hover:text-gray-800'}">✍️ Questões</button>
 <button onclick="e.aba='analises';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='analises'?'tab-active':'text-gray-600 hover:text-gray-800'}">🧠 Análises${analisesPendentes(c)>0?`<span class="absolute top-2 right-2 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">${analisesPendentes(c)}</span>`:''}</button>
 <button onclick="e.aba='caderno';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='caderno'?'tab-active':'text-gray-600 hover:text-gray-800'}">📓 Caderno</button>
