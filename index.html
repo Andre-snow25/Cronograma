@@ -1739,10 +1739,42 @@ const CAD_DICAS = {
   '.ql-indent[value="-1"]':'Diminuir recuo','.ql-indent[value="+1"]':'Aumentar recuo','.ql-align':'Alinhamento',
   '.ql-blockquote':'Citação','.ql-code-block':'Bloco de código','.ql-link':'Link','.ql-image':'Imagem','.ql-clean':'Limpar formatação'
 };
+// Fundo da página solta. Nos tópicos escritos muda papel/pauta/tinta; nas páginas importadas
+// (que têm o próprio visual) aplica um filtro de cor por cima do iframe.
+const CAD_TEMAS = {
+  caderno:{nome:'📒 Caderno', filtro:''},
+  branco: {nome:'⬜ Branco',  filtro:''},
+  sepia:  {nome:'📜 Sépia',   filtro:'sepia(.4) brightness(.96) contrast(.95)'},
+  verde:  {nome:'🌿 Verde-claro', filtro:'sepia(.3) hue-rotate(50deg) saturate(.8) brightness(.97)'},
+  noite:  {nome:'🌙 Noite',   filtro:'invert(.9) hue-rotate(180deg)'}
+};
+function cadTemaAtual(){ try{ const t = localStorage.getItem('cadTema'); return CAD_TEMAS[t] ? t : 'caderno'; }catch{ return 'caderno'; } }
+function cadAplicarTema(win, tema){
+  if(!win || win.closed) return;
+  const d = win.document;
+  d.body.dataset.tema = tema;
+  const sel = d.getElementById('tema'); if(sel) sel.value = tema;
+  const fr = d.querySelector('#wrap iframe');
+  if(fr) fr.style.filter = CAD_TEMAS[tema].filtro || '';
+}
 const CAD_CSS_JANELA = `
   html,body{margin:0;height:100%}
-  body{font-family:system-ui,sans-serif;background:#e5e7eb;display:flex;flex-direction:column}
-  #topo{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;background:#fff;border-bottom:1px solid #e5e7eb}
+  body{--fundo:#e5e7eb;--papel:#fffef8;--pauta:#bfdbfe;--margem:#f87171;--tinta:#111827;--barra:#f9fafb;--topo:#fff;--borda:#e5e7eb;--icone:#444;--tabela:#fff;--cab-tabela:#eef2ff}
+  body[data-tema="branco"]{--papel:#fff;--pauta:transparent;--margem:transparent}
+  body[data-tema="sepia"]{--fundo:#e7dcc6;--papel:#f4ecd8;--pauta:#e2d3b3;--margem:#d9a38f;--tinta:#3b2f1e;--barra:#efe5cf;--topo:#f4ecd8;--borda:#dccdb0;--tabela:#f8f1e1;--cab-tabela:#eadcc0}
+  body[data-tema="verde"]{--fundo:#d9e8d9;--papel:#eaf4e8;--pauta:#cfe2cc;--margem:#e0a6a6;--tinta:#1f2d1f;--barra:#e2efe0;--topo:#eaf4e8;--borda:#c9dcc6;--tabela:#f3f9f2;--cab-tabela:#d7e9d4}
+  body[data-tema="noite"]{--fundo:#111418;--papel:#1e2227;--pauta:#2a3038;--margem:#5b2626;--tinta:#d6d9de;--barra:#23282e;--topo:#1a1e23;--borda:#2f353d;--icone:#cbd5e1;--tabela:#23282e;--cab-tabela:#2c3440}
+  body[data-tema="noite"] #tit{color:#e5e7eb}
+  body[data-tema="noite"] .ql-snow .ql-stroke{stroke:var(--icone)}
+  body[data-tema="noite"] .ql-snow .ql-fill{fill:var(--icone)}
+  body[data-tema="noite"] .ql-snow .ql-picker{color:var(--icone)}
+  body[data-tema="noite"] .ql-snow .ql-picker-options{background:#23282e}
+  body[data-tema="noite"] .ql-editor.ql-blank::before{color:#6b7280}
+  body[data-tema="noite"] .ql-editor td{border-color:#4b5563}
+  body[data-tema="noite"] .ql-snow .ql-tooltip{background:#23282e;color:#e5e7eb}
+  body{font-family:system-ui,sans-serif;background:var(--fundo);display:flex;flex-direction:column}
+  #topo{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 14px;background:var(--topo);border-bottom:1px solid var(--borda)}
+  #tema{font:600 12px system-ui,sans-serif;border:1px solid var(--borda);border-radius:8px;padding:4px 6px;background:var(--barra);color:var(--tinta);cursor:pointer}
   #mat{font-size:11px;font-weight:700;color:#6366f1;text-transform:uppercase;letter-spacing:.04em}
   #tit{font-size:16px;font-weight:700;color:#111827;word-break:break-word}
   #status{font-size:12px;color:#9ca3af;text-align:right}
@@ -1750,14 +1782,14 @@ const CAD_CSS_JANELA = `
   #btn-grande{font:600 12px system-ui,sans-serif;color:#4338ca;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:5px 10px;cursor:pointer;white-space:nowrap}
   #btn-grande:hover{background:#e0e7ff}
   #wrap{flex:1;display:flex;flex-direction:column;min-height:0}
-  .ql-toolbar.ql-snow{background:#f9fafb;border:none;border-bottom:1px solid #e5e7eb}
+  .ql-toolbar.ql-snow{background:var(--barra);border:none;border-bottom:1px solid var(--borda)}
   .ql-container.ql-snow{flex:1;overflow:auto;border:none}
   /* folha de caderno: pauta a cada 26px (= altura da linha) e margem vermelha */
   .ql-editor{max-width:860px;min-height:100%;box-sizing:border-box;margin:0 auto;padding:26px 32px 52px 78px;
-    font-size:15px;line-height:26px;box-shadow:0 0 0 1px #d1d5db;
-    background-color:#fffef8;
-    background-image:linear-gradient(90deg,transparent 58px,#f87171 58px,#f87171 60px,transparent 60px),
-      repeating-linear-gradient(to bottom,transparent 0,transparent 25px,#bfdbfe 25px,#bfdbfe 26px);
+    font-size:15px;line-height:26px;box-shadow:0 0 0 1px var(--borda);color:var(--tinta);
+    background-color:var(--papel);
+    background-image:linear-gradient(90deg,transparent 58px,var(--margem) 58px,var(--margem) 60px,transparent 60px),
+      repeating-linear-gradient(to bottom,transparent 0,transparent 25px,var(--pauta) 25px,var(--pauta) 26px);
     background-position:0 0, 0 26px}
   .ql-editor p,.ql-editor li{line-height:26px}
   .ql-editor h1{font-size:1.7em;line-height:52px;margin:0}
@@ -1766,9 +1798,9 @@ const CAD_CSS_JANELA = `
   .ql-editor .ql-size-large{line-height:26px}.ql-editor .ql-size-huge{line-height:52px}
   .ql-editor img{display:block;margin:4px 0}
   /* tabelas: colunas do tamanho do conteúdo (o padrão do Quill divide em partes iguais) */
-  .ql-editor table{table-layout:auto;width:auto;max-width:100%;border-collapse:collapse;background:#fff;margin:4px 0}
+  .ql-editor table{table-layout:auto;width:auto;max-width:100%;border-collapse:collapse;background:var(--tabela);margin:4px 0}
   .ql-editor td{border:1px solid #9ca3af;padding:4px 14px;line-height:20px;vertical-align:top;min-width:70px}
-  .ql-editor tr:first-child td{background:#eef2ff}
+  .ql-editor tr:first-child td{background:var(--cab-tabela)}
   .ql-marcatexto{width:32px!important}
 `;
 
@@ -1967,9 +1999,14 @@ async function cadJanelaGrande(){
 async function cadPrepararJanela(win){
   const d = win.document;
   d.head.innerHTML = `<meta charset="utf-8"><link rel="stylesheet" href="${QUILL_CSS}"><style>${CAD_CSS_JANELA}</style>`;
-  d.body.innerHTML = `<div id="topo"><div><div id="mat"></div><div id="tit"></div></div><div id="acoes"><span id="status"></span>${
+  d.body.innerHTML = `<div id="topo"><div><div id="mat"></div><div id="tit"></div></div><div id="acoes"><span id="status"></span><select id="tema" title="Cor do fundo da página">${Object.entries(CAD_TEMAS).map(([k,t])=>`<option value="${k}">${t.nome}</option>`).join('')}</select>${
     cadJanelaPiP ? '<button id="btn-grande" title="Abrir este tópico numa janela comum, do tamanho da tela (não fica sempre na frente)">⛶ Janela grande</button>' : ''}</div></div><div id="wrap"></div>`;
   d.getElementById('btn-grande')?.addEventListener('click', cadJanelaGrande);
+  d.getElementById('tema').addEventListener('change', ev=>{
+    try{ localStorage.setItem('cadTema', ev.target.value); }catch{}
+    cadAplicarTema(win, ev.target.value);
+  });
+  cadAplicarTema(win, cadTemaAtual());
   if(!win.Quill){
     // o Quill precisa rodar dentro da própria janela (ele usa o "document" dela)
     await new Promise((ok, falha)=>{
@@ -2007,6 +2044,7 @@ async function cadCarregarNaJanela(win, topico){
     fr.style.cssText = 'flex:1;width:100%;border:0;background:#fff';
     fr.srcdoc = cadInjetarAnot(html || '<p style="font-family:system-ui;padding:16px;color:#888">Página vazia.</p>', anot);
     wrap.appendChild(fr);
+    cadAplicarTema(win, cadTemaAtual());
     // grifos/notas chegam da página por mensagem (ela é isolada e não acessa o app)
     win.addEventListener('message', ev=>{
       if(ev.source!==fr.contentWindow || !ev.data || !ev.data.cadAnot) return;
