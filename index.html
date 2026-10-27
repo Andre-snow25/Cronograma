@@ -2476,15 +2476,20 @@ const cadAnotCache = {};
 const cadAnotTimer = {};
 async function cadObterAnot(id){
   if(cadAnotCache[id]) return cadAnotCache[id];
-  let anot = null;
+  let anot = null, daNuvem = false;
   try{
     const snap = await getDoc(cadDocRef(id+'__anot'));
-    if(snap.exists()) anot = snap.data().anot || null;
+    if(snap.exists()){ anot = snap.data().anot || null; daNuvem = !!anot; }
   }catch(err){ console.error('Erro ao carregar anotações:', err); }
   if(!anot){ try{ anot = JSON.parse(localStorage.getItem('cad_anot_'+id) || 'null'); }catch{} }
+  // anotações que só ficaram no navegador (salvamento falhou): envia para a nuvem agora
+  if(anot && !daNuvem && ((anot.hl||[]).length || (anot.notas||[]).length)) setTimeout(()=>cadSalvarAnot(id, anot), 0);
   return cadAnotCache[id] = anot || {hl:[], notas:[]};
 }
 function cadSalvarAnot(id, dados){
+  // Os dados chegam da página importada (outra janela/iframe): o Firebase só aceita objetos
+  // criados nesta página ("custom Object" dá erro). Recria com o JSON daqui.
+  dados = JSON.parse(JSON.stringify(dados || {hl:[], notas:[]}));
   cadAnotCache[id] = dados;
   try{ localStorage.setItem('cad_anot_'+id, JSON.stringify(dados)); }catch{}
   if(cadQuillTopico===id) cadStatus('Salvando anotações...');
@@ -2495,7 +2500,9 @@ function cadSalvarAnot(id, dados){
       if(cadQuillTopico===id) cadStatus('✓ Anotações salvas','text-green-600');
     }catch(err){
       console.error('Erro ao salvar anotações:', err);
-      if(cadQuillTopico===id) cadStatus('⚠️ Anotações guardadas só neste navegador','text-red-600');
+      if(cadQuillTopico===id) cadStatus(err?.code==='permission-denied'
+        ? '⚠️ O Firebase bloqueou (regras). Anotações guardadas só neste navegador.'
+        : '⚠️ Erro ao salvar anotações na nuvem. Guardadas neste navegador; salvo de novo na próxima mudança.','text-red-600');
     }
   }, 800);
 }
