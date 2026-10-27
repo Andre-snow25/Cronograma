@@ -1814,7 +1814,7 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
     return `<li class="flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-gray-50'}">
       <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${i+1}.</span>
       <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
-        <span class="font-semibold text-gray-800 break-words">${t.tipo==='html'?'🎨':'📄'} ${escHtml(t.nome)}</span>${t.tipo==='html'?'<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-bold">página importada</span>':''}
+        <span class="font-semibold text-gray-800 break-words">${t.tipo==='html'?'🎨':'📄'} ${escHtml(t.nome)}</span>${t.tipo==='html'?'<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-bold">página importada · grifos e notas</span>':''}
         ${naJanela?'<span class="ml-2 text-xs text-indigo-600 font-bold">● aberto na página solta</span>':''}
       </button>
       ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
@@ -1999,15 +1999,20 @@ async function cadCarregarNaJanela(win, topico){
     cadQuill = null; cadQuillTopico = topico;
     wrap.innerHTML = '<p style="padding:12px;color:#9ca3af;font-size:13px">Carregando...</p>';
     rend();
-    const html = await cadObterHtml(topico);
+    const [html, anot] = await Promise.all([cadObterHtml(topico), cadObterAnot(topico)]);
     if(cadQuillTopico!==topico || cadJanela!==win) return;
     wrap.innerHTML = '';
     const fr = d.createElement('iframe');
-    fr.setAttribute('sandbox','allow-scripts allow-popups allow-popups-to-escape-sandbox');
+    fr.setAttribute('sandbox','allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals');
     fr.style.cssText = 'flex:1;width:100%;border:0;background:#fff';
-    fr.srcdoc = html || '<p style="font-family:system-ui;padding:16px;color:#888">Página vazia.</p>';
+    fr.srcdoc = cadInjetarAnot(html || '<p style="font-family:system-ui;padding:16px;color:#888">Página vazia.</p>', anot);
     wrap.appendChild(fr);
-    cadStatus('🎨 Página importada (somente leitura)');
+    // grifos/notas chegam da página por mensagem (ela é isolada e não acessa o app)
+    win.addEventListener('message', ev=>{
+      if(ev.source!==fr.contentWindow || !ev.data || !ev.data.cadAnot) return;
+      cadSalvarAnot(topico, ev.data.dados);
+    });
+    cadStatus('🖍️ Selecione um trecho para grifar ou anotar');
     return;
   }
   wrap.innerHTML = '<div id="editor"></div>';
@@ -2274,6 +2279,227 @@ async function cadExportar(materiaId, formato, topicoId){
   }
 }
 
+// Grifos e anotações nas páginas importadas. Esta função é injetada DENTRO da página (iframe
+// isolado): ela não enxerga o app, então avisa cada mudança por postMessage e o app salva.
+// Os grifos são guardados como posições no texto da página (início/fim), por isso continuam
+// no lugar certo mesmo que a janela mude de tamanho.
+function cadAnotRuntime(DADOS){
+  const st = {hl: DADOS.hl || [], notas: DADOS.notas || []};
+  const CORES = {amarelo:'#fff176', verde:'#b9f6ca', azul:'#b3e5fc', rosa:'#f8bbd0'};
+  const UI = 'data-anot-ui';
+  const novoId = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
+  let timer = null;
+  const salvar = () => {
+    clearTimeout(timer);
+    timer = setTimeout(()=>parent.postMessage({cadAnot:true, dados:{hl:st.hl, notas:st.notas}}, '*'), 400);
+  };
+
+  // nós de texto da página, na ordem, ignorando a interface de anotação
+  function nos(){
+    const out = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {acceptNode(n){
+      const p = n.parentElement;
+      return (!p || p.closest('['+UI+'],script,style,noscript,textarea')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    }});
+    let n, pos = 0;
+    while((n = w.nextNode())){ out.push({n, ini:pos}); pos += n.data.length; }
+    return out;
+  }
+  function posDoPonto(container, offset){
+    const lista = nos();
+    if(container.nodeType === 3){
+      const x = lista.find(x=>x.n===container);
+      if(x) return x.ini + offset;
+    }
+    const r = document.createRange();
+    r.setStart(container, offset);
+    for(const x of lista) if(r.comparePoint(x.n, 0) >= 0) return x.ini;
+    const u = lista[lista.length-1];
+    return u ? u.ini + u.n.data.length : 0;
+  }
+
+  function grifar(h){
+    const alvo = [];
+    for(const x of nos()){
+      const L = x.n.data.length, a = Math.max(h.s, x.ini), b = Math.min(h.e, x.ini + L);
+      if(a < b && /\S/.test(x.n.data.slice(a - x.ini, b - x.ini))) alvo.push({n:x.n, a:a - x.ini, b:b - x.ini});
+    }
+    alvo.forEach(({n,a,b})=>{
+      let t = n;
+      if(b < t.data.length) t.splitText(b);
+      if(a > 0) t = t.splitText(a);
+      const m = document.createElement('mark');
+      m.dataset.hl = h.id;
+      m.style.background = CORES[h.cor] || h.cor;
+      t.parentNode.insertBefore(m, t);
+      m.appendChild(t);
+    });
+  }
+  function desgrifar(id){
+    document.querySelectorAll('mark[data-hl="'+id+'"]').forEach(m=>{
+      const p = m.parentNode;
+      while(m.firstChild) p.insertBefore(m.firstChild, m);
+      p.removeChild(m);
+      p.normalize();
+    });
+  }
+
+  // bloco (parágrafo, caixa, tabela...) onde a anotação entra logo abaixo
+  function blocoDe(pos){
+    let alvo = null;
+    for(const x of nos()) if(pos <= x.ini + x.n.data.length){ alvo = x.n; break; }
+    // não pode ficar dentro de linhas lado a lado (cartões, grade, tabela): sobe até sair delas
+    const emLinha = el => {
+      for(let a = el.parentElement; a && a !== document.body; a = a.parentElement){
+        const cs = getComputedStyle(a);
+        if(/grid|table/.test(cs.display) || (/flex/.test(cs.display) && !/^column/.test(cs.flexDirection))) return true;
+      }
+      return false;
+    };
+    let el = alvo ? alvo.parentElement : null;
+    while(el && el !== document.body){
+      const d = getComputedStyle(el).display;
+      const bloco = !/^inline/.test(d) && d !== 'contents' && !/^table-/.test(d) && el.tagName !== 'MARK';
+      if(bloco && !emLinha(el)) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+  function criarNota(n){
+    const box = document.createElement('div');
+    box.className = 'anot-nota';
+    box.setAttribute(UI, '');
+    box.innerHTML = '<div class="cab"><span>📝 Minha anotação</span><button title="Apagar anotação">×</button></div><textarea placeholder="Escreva sua anotação..."></textarea>';
+    const ta = box.querySelector('textarea');
+    ta.value = n.texto || '';
+    const ajustar = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+    ta.addEventListener('input', ()=>{ n.texto = ta.value; ajustar(); salvar(); });
+    box.querySelector('button').onclick = () => {
+      if(ta.value.trim() && !confirm('Apagar esta anotação?')) return;
+      st.notas = st.notas.filter(x=>x.id!==n.id);
+      box.remove(); salvar();
+    };
+    const bloco = blocoDe(n.pos);
+    if(bloco) bloco.after(box); else document.body.appendChild(box);
+    requestAnimationFrame(ajustar);
+    return ta;
+  }
+
+  function iniciar(){
+    const css = document.createElement('style');
+    css.setAttribute(UI, '');
+    css.textContent = `
+      mark[data-hl]{color:#111;border-radius:2px;padding:0 1px;cursor:pointer;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+      #anot-bar{position:absolute;z-index:2147483647;display:none;align-items:center;gap:5px;background:#1f2937;padding:6px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+      #anot-bar button{border:0;border-radius:6px;cursor:pointer;font:600 12px system-ui,sans-serif;padding:5px 9px;color:#111}
+      #anot-bar .cor{width:24px;height:24px;padding:0;border:2px solid rgba(255,255,255,.6)}
+      .anot-nota{margin:8px 0;border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:6px 10px 8px;color:#1f2937;box-shadow:0 1px 4px rgba(0,0,0,.12);max-width:70ch;font:14px system-ui,sans-serif}
+      .anot-nota .cab{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:#b45309;margin-bottom:2px}
+      .anot-nota .cab button{border:0;background:none;cursor:pointer;color:#b45309;font-size:16px;line-height:1}
+      .anot-nota textarea{display:block;width:100%;box-sizing:border-box;border:0;background:transparent;resize:none;outline:none;min-height:44px;font:14px/1.5 system-ui,sans-serif;color:#1f2937}`;
+    document.head.appendChild(css);
+
+    st.hl.forEach(h=>{ try{ grifar(h); }catch(e){} });
+    st.notas.forEach(n=>{ try{ criarNota(n); }catch(e){} });
+
+    const bar = document.createElement('div');
+    bar.id = 'anot-bar';
+    bar.setAttribute(UI, '');
+    bar.innerHTML = Object.entries(CORES).map(([k,v])=>'<button class="cor" data-cor="'+k+'" title="Grifar" style="background:'+v+'"></button>').join('')
+      + '<button data-acao="nota" style="background:#fbbf24">📝 Nota</button>'
+      + '<button data-acao="tirar" style="background:#fff">Tirar grifo</button>';
+    document.body.appendChild(bar);
+    let sel = null, hl = null;
+    const esconder = () => { bar.style.display = 'none'; };
+    const mostrar = (rect, modo) => {
+      bar.querySelector('[data-acao="tirar"]').style.display = modo==='hl' ? '' : 'none';
+      bar.style.display = 'flex';
+      const top = rect.top + scrollY - bar.offsetHeight - 8;
+      bar.style.top = (top < scrollY ? rect.bottom + scrollY + 8 : top) + 'px';
+      bar.style.left = Math.max(4, Math.min(rect.left + scrollX, scrollX + innerWidth - bar.offsetWidth - 4)) + 'px';
+    };
+    document.addEventListener('mouseup', ev=>{
+      if(ev.target.closest && ev.target.closest('#anot-bar')) return;
+      setTimeout(()=>{
+        const s = getSelection();
+        if(s.rangeCount && !s.isCollapsed){
+          const r = s.getRangeAt(0);
+          const c = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement;
+          if(!(c && c.closest('['+UI+']'))){
+            const a = posDoPonto(r.startContainer, r.startOffset), b = posDoPonto(r.endContainer, r.endOffset);
+            if(b > a){ sel = {s:a, e:b}; hl = null; mostrar(r.getBoundingClientRect(), 'sel'); return; }
+          }
+        }
+        const m = ev.target.closest && ev.target.closest('mark[data-hl]');
+        if(m){ hl = m.dataset.hl; sel = null; mostrar(m.getBoundingClientRect(), 'hl'); return; }
+        esconder();
+      }, 10);
+    });
+    document.addEventListener('keydown', ev=>{ if(ev.key === 'Escape') esconder(); });
+    bar.addEventListener('mousedown', ev=>ev.preventDefault()); // não perde a seleção ao clicar na barra
+    bar.addEventListener('click', ev=>{
+      const b = ev.target.closest('button');
+      if(!b) return;
+      if(b.dataset.cor && sel){
+        const h = {id:novoId('h'), s:sel.s, e:sel.e, cor:b.dataset.cor};
+        st.hl.push(h); grifar(h); getSelection().removeAllRanges(); salvar();
+      } else if(b.dataset.cor && hl){
+        const h = st.hl.find(x=>x.id===hl);
+        if(h){ h.cor = b.dataset.cor; document.querySelectorAll('mark[data-hl="'+hl+'"]').forEach(m=>m.style.background = CORES[h.cor]); salvar(); }
+      } else if(b.dataset.acao === 'nota'){
+        const pos = sel ? sel.e : (st.hl.find(x=>x.id===hl) || {}).e;
+        if(pos != null){
+          const n = {id:novoId('n'), pos, texto:''};
+          st.notas.push(n);
+          const ta = criarNota(n);
+          getSelection().removeAllRanges(); salvar(); ta.focus();
+        }
+      } else if(b.dataset.acao === 'tirar' && hl){
+        st.hl = st.hl.filter(x=>x.id!==hl); desgrifar(hl); salvar();
+      }
+      esconder();
+    });
+  }
+  if(document.readyState === 'complete') iniciar(); else addEventListener('load', iniciar);
+}
+
+// Página importada + script de anotação (com os grifos/notas salvos) no fim do <body>
+function cadInjetarAnot(html, anot){
+  const json = JSON.stringify(anot || {}).replace(/</g, '\\u003c');
+  const tag = '<scr'+'ipt>(' + cadAnotRuntime.toString() + ')(' + json + ');</scr'+'ipt>';
+  const i = html.toLowerCase().lastIndexOf('</body>');
+  return i >= 0 ? html.slice(0, i) + tag + html.slice(i) : html + tag;
+}
+
+// Anotações ficam num documento à parte ({topico}__anot), para não mexer na página original
+const cadAnotCache = {};
+const cadAnotTimer = {};
+async function cadObterAnot(id){
+  if(cadAnotCache[id]) return cadAnotCache[id];
+  let anot = null;
+  try{
+    const snap = await getDoc(cadDocRef(id+'__anot'));
+    if(snap.exists()) anot = snap.data().anot || null;
+  }catch(err){ console.error('Erro ao carregar anotações:', err); }
+  if(!anot){ try{ anot = JSON.parse(localStorage.getItem('cad_anot_'+id) || 'null'); }catch{} }
+  return cadAnotCache[id] = anot || {hl:[], notas:[]};
+}
+function cadSalvarAnot(id, dados){
+  cadAnotCache[id] = dados;
+  try{ localStorage.setItem('cad_anot_'+id, JSON.stringify(dados)); }catch{}
+  if(cadQuillTopico===id) cadStatus('Salvando anotações...');
+  clearTimeout(cadAnotTimer[id]);
+  cadAnotTimer[id] = setTimeout(async ()=>{
+    try{
+      await setDoc(cadDocRef(id+'__anot'), {anot:dados, atualizado:new Date().toISOString()});
+      if(cadQuillTopico===id) cadStatus('✓ Anotações salvas','text-green-600');
+    }catch(err){
+      console.error('Erro ao salvar anotações:', err);
+      if(cadQuillTopico===id) cadStatus('⚠️ Anotações guardadas só neste navegador','text-red-600');
+    }
+  }, 800);
+}
+
 // Importa uma página pronta (HTML) como tópico do caderno, para não perder o visual ao colar
 function cadImportarPagina(materiaId){
   const m = cad().materias.find(x=>x.id===materiaId);
@@ -2407,6 +2633,11 @@ async function cadExcluir(id){
     delete cadCache[t.id];
     try{ localStorage.removeItem('cad_'+t.id); }catch{}
     deleteDoc(cadDocRef(t.id)).catch(err=>console.error('Erro ao excluir página:',err));
+    if(t.tipo==='html'){
+      delete cadAnotCache[t.id];
+      try{ localStorage.removeItem('cad_anot_'+t.id); }catch{}
+      deleteDoc(cadDocRef(t.id+'__anot')).catch(()=>{});
+    }
   });
   sv(); rend();
 }
