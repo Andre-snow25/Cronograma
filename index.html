@@ -1853,7 +1853,7 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
       </button>
       ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
       ${t.tipo==='html'
-        ? `<button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
+        ? `<button onclick="cadImportarPagina('${aberta.id}','${t.id}')" title="Atualizar com uma versão nova do Claude (mantém grifos e notas)" class="text-xs text-gray-400 hover:text-indigo-700 px-1">🔄</button><button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
         : `<button onclick="cadExportar('${aberta.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>`}
       <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
       <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
@@ -2549,14 +2549,59 @@ function cadSalvarAnot(id, dados){
 }
 
 // Importa uma página pronta (HTML) como tópico do caderno, para não perder o visual ao colar
-function cadImportarPagina(materiaId){
+// Texto da página como o script de anotação enxerga (posições dos grifos/notas são contadas nele)
+function cadTextoPagina(html){
+  const doc = new DOMParser().parseFromString(html || '', 'text/html');
+  if(!doc.body) return '';
+  const w = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {acceptNode(n){
+    const p = n.parentElement;
+    return (!p || p.closest('script,style,noscript,textarea')) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+  }});
+  let n, out = '';
+  while((n = w.nextNode())) out += n.data;
+  return out;
+}
+// Leva grifos e notas da versão antiga para a nova, procurando o mesmo trecho de texto
+function cadRemapearAnot(anot, antigo, novo){
+  const proporcao = antigo.length ? novo.length / antigo.length : 1;
+  const maisPerto = (trecho, alvo) => {
+    let melhor = -1;
+    for(let i = novo.indexOf(trecho); i >= 0; i = novo.indexOf(trecho, i + 1)){
+      if(melhor < 0 || Math.abs(i - alvo) < Math.abs(melhor - alvo)) melhor = i;
+    }
+    return melhor;
+  };
+  const hl = [], notas = [];
+  let perdidos = 0;
+  (anot.hl || []).forEach(h=>{
+    const trecho = antigo.slice(h.s, h.e);
+    const i = trecho.trim() ? maisPerto(trecho, h.s * proporcao) : -1;
+    if(i >= 0) hl.push({...h, s:i, e:i + trecho.length}); else perdidos++;
+  });
+  (anot.notas || []).forEach(n=>{
+    // procura o texto logo antes da nota; se sumiu, mantém a nota na posição proporcional
+    let pos = -1;
+    for(const tam of [60, 25, 10]){
+      const ctx = antigo.slice(Math.max(0, n.pos - tam), n.pos);
+      if(ctx.trim()){ const i = maisPerto(ctx, n.pos * proporcao - ctx.length); if(i >= 0){ pos = i + ctx.length; break; } }
+    }
+    notas.push({...n, pos: pos >= 0 ? pos : Math.round(n.pos * proporcao)});
+  });
+  return {anot:{hl, notas}, perdidos};
+}
+
+function cadImportarPagina(materiaId, topicoId){
   const m = cad().materias.find(x=>x.id===materiaId);
   if(!m) return;
+  const atual = topicoId ? m.topicos.find(x=>x.id===topicoId) : null;
+  if(topicoId && !atual) return;
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay" id="modal-overlay">
       <div class="modal-box fade" style="max-width:680px;max-height:90vh;overflow-y:auto">
-        <h3 class="text-lg font-bold mb-1">📥 Importar página do Claude</h3>
-        <p class="text-sm text-gray-500 mb-3">Para resumos com visual próprio (cores, cartões, quadros). A página fica no caderno <b>${escHtml(m.nome)}</b> exatamente como no Claude.</p>
+        <h3 class="text-lg font-bold mb-1">${atual?'🔄 Atualizar página importada':'📥 Importar página do Claude'}</h3>
+        <p class="text-sm text-gray-500 mb-3">${atual
+          ? `Troca o conteúdo de <b>${escHtml(atual.nome)}</b> pela versão nova que o Claude gerou. Seus grifos e notas são levados para os mesmos trechos na versão nova (o que não existir mais é avisado).`
+          : `Para resumos com visual próprio (cores, cartões, quadros). A página fica no caderno <b>${escHtml(m.nome)}</b> exatamente como no Claude.`}</p>
         <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 mb-4 space-y-1">
           <p><b>Como pegar a página no Claude:</b></p>
           <p>• No artifact, abra o menu (⋯ ou o botão de download) e escolha <b>baixar</b> o arquivo <b>.html</b> — depois envie aqui em "Carregar arquivo"; <b>ou</b></p>
@@ -2571,12 +2616,13 @@ function cadImportarPagina(materiaId){
         </label>
         <div class="flex gap-3 mt-5">
           <button id="imp-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-          <button id="imp-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Importar</button>
+          <button id="imp-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">${atual?'Atualizar':'Importar'}</button>
         </div>
       </div>
     </div>`;
   const nomeEl = document.getElementById('imp-nome');
   const htmlEl = document.getElementById('imp-html');
+  if(atual) nomeEl.value = atual.nome;
   const sugerirNome = html => {
     if(nomeEl.value.trim()) return;
     const t = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
@@ -2591,13 +2637,32 @@ function cadImportarPagina(materiaId){
     if(!nomeEl.value.trim()) nomeEl.value = f.name.replace(/\.[^.]+$/,'');
   };
   document.getElementById('imp-cancelar').onclick = () => { document.getElementById('modal-root').innerHTML=''; };
-  document.getElementById('imp-salvar').onclick = () => {
+  document.getElementById('imp-salvar').onclick = async () => {
     const nome = nomeEl.value.trim();
     const html = htmlEl.value.trim();
     if(!nome){ntf('❌ Dê um nome ao tópico','er');return;}
     if(!html){ntf('❌ Cole o código da página ou carregue o arquivo','er');return;}
     if(!/<[a-z!]/i.test(html)){ntf('❌ Isso não parece código HTML. Copie o código do artifact (não o texto da página).','er');return;}
     if(html.length > CAD_LIMITE){ntf('❌ Página grande demais para guardar (máx. ~900 KB).','er');return;}
+    if(atual){
+      const botao = document.getElementById('imp-salvar');
+      botao.disabled = true; botao.textContent = 'Atualizando...';
+      const [antigo, anot] = await Promise.all([cadObterHtml(atual.id), cadObterAnot(atual.id)]);
+      const r = cadRemapearAnot(anot, cadTextoPagina(antigo), cadTextoPagina(html));
+      atual.nome = nome;
+      atual.atualizado = new Date().toISOString();
+      cadCache[atual.id] = html;
+      cadPendente = atual.id;
+      await cadSalvarAgora();
+      cadSalvarAnot(atual.id, r.anot);
+      document.getElementById('modal-root').innerHTML='';
+      sv(); rend();
+      if(cadQuillTopico===atual.id && cadJanela && !cadJanela.closed) cadCarregarNaJanela(cadJanela, atual.id);
+      ntf(r.perdidos
+        ? `🔄 Página atualizada. ${r.perdidos} grifo(s) eram de trechos que não existem mais e saíram.`
+        : '🔄 Página atualizada! Grifos e notas mantidos.');
+      return;
+    }
     const t = {id:cadNovoId('ct'), nome, tipo:'html', criado:new Date().toISOString()};
     m.topicos.push(t);
     cadCache[t.id] = html;
