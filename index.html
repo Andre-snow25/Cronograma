@@ -1853,7 +1853,7 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
       </button>
       ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
       ${t.tipo==='html'
-        ? `<button onclick="cadImportarPagina('${aberta.id}','${t.id}')" title="Atualizar com uma versão nova do Claude (mantém grifos e notas)" class="text-xs text-gray-400 hover:text-indigo-700 px-1">🔄</button><button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
+        ? `<button onclick="cadImportarPagina('${aberta.id}','${t.id}')" title="Atualizar com uma versão nova do Claude (mantém grifos e notas)" class="text-xs text-gray-400 hover:text-indigo-700 px-1">🔄</button><button onclick="cadPdfPagina('${t.id}')" title="Salvar em PDF (com grifos e notas)" class="text-xs text-gray-400 hover:text-red-700 px-1">🖨️</button><button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
         : `<button onclick="cadExportar('${aberta.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>`}
       <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
       <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
@@ -2672,6 +2672,36 @@ function cadImportarPagina(materiaId, topicoId){
     sv(); rend();
     ntf('🎨 Página importada! Clique nela para abrir.');
   };
+}
+// PDF da página importada: monta a página (com grifos e notas) num iframe isolado fora da tela
+// e abre a impressão de dentro dele — no diálogo, o destino "Salvar como PDF" gera o arquivo.
+async function cadPdfPagina(id){
+  const achado = cadAcharTopico(id);
+  if(!achado) return;
+  ntf('🖨️ Preparando o PDF...');
+  const [html, anot] = await Promise.all([cadObterHtml(id), cadObterAnot(id)]);
+  const css = '<style>@page{margin:12mm}'
+    + '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}'
+    + '@media print{#anot-bar,.anot-nota .cab button{display:none!important}.anot-nota{break-inside:avoid}}</style>';
+  const imprimir = '<scr'+'ipt>addEventListener("load",()=>setTimeout(()=>{'
+    + 'document.title=' + JSON.stringify(achado.t.nome).replace(/</g,'\u003c') + ';'
+    + 'addEventListener("afterprint",()=>parent.postMessage({cadPdfFim:true},"*"));print();},700));</scr'+'ipt>';
+  let pagina = cadInjetarAnot(html || '<p>Página vazia.</p>', anot);
+  const i = pagina.toLowerCase().lastIndexOf('</body>');
+  pagina = i >= 0 ? pagina.slice(0, i) + css + imprimir + pagina.slice(i) : pagina + css + imprimir;
+  document.getElementById('cad-pdf-frame')?.remove();
+  const fr = document.createElement('iframe');
+  fr.id = 'cad-pdf-frame';
+  fr.setAttribute('sandbox', 'allow-scripts allow-modals');
+  fr.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0;color-scheme:light';
+  fr.srcdoc = pagina;
+  const fim = ev => {
+    if(ev.source!==fr.contentWindow || !ev.data || !ev.data.cadPdfFim) return;
+    removeEventListener('message', fim);
+    setTimeout(()=>fr.remove(), 500);
+  };
+  addEventListener('message', fim);
+  document.body.appendChild(fr);
 }
 async function cadBaixarPagina(id){
   const achado = cadAcharTopico(id);
@@ -3765,6 +3795,7 @@ ${svgChartPomodoros(14)}
   window.cadExportar = cadExportar;
   window.cadImportarPagina = cadImportarPagina;
   window.cadBaixarPagina = cadBaixarPagina;
+  window.cadPdfPagina = cadPdfPagina;
   window.cadRenomear = cadRenomear;
   window.cadExcluir = cadExcluir;
   window.addMaterial = addMaterial;
