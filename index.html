@@ -2501,6 +2501,23 @@ function cadAnotRuntime(DADOS){
       esconder();
     });
   }
+  // Links da página: como ela é carregada por srcdoc, "#aula-5" apontaria para o endereço do app
+  // e o iframe sairia da página. Os internos rolam até a seção; os externos abrem em outra aba.
+  document.addEventListener('click', ev=>{
+    const a = ev.target.closest && ev.target.closest('a[href]');
+    if(!a || ev.defaultPrevented) return;
+    const href = a.getAttribute('href');
+    if(href.startsWith('#')){
+      ev.preventDefault();
+      const id = decodeURIComponent(href.slice(1));
+      const alvo = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
+      if(alvo) alvo.scrollIntoView({behavior:'smooth', block:'start'});
+      else if(!id || id === 'top') scrollTo({top:0, behavior:'smooth'});
+    } else if(/^(https?:|mailto:)/i.test(href)){
+      ev.preventDefault();
+      window.open(href, '_blank', 'noopener');
+    }
+  });
   if(document.readyState === 'complete') iniciar(); else addEventListener('load', iniciar);
 }
 
