@@ -15,6 +15,7 @@ body{font-family:system-ui}
 textarea{resize:vertical;min-height:60px}
 .sync-indicator{animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.cad-alvo{box-shadow:inset 0 3px 0 #6366f1;background:#eef2ff}
 </style>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
@@ -1724,6 +1725,7 @@ const cadCache = {};          // topicoId -> html já carregado/editado
 let cadSalvarTimer = null, cadPendente = null;
 const cadSalvo = {};          // topicoId -> último html enviado para a nuvem
 let cadFiltro = '';           // filtro da estante de cadernos
+let cadFiltroTop = '';        // filtro dos tópicos do caderno aberto
 const CAD_LIMITE = 900*1024;
 const QUILL_JS = 'https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js';
 const QUILL_CSS = 'https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css';
@@ -1840,12 +1842,27 @@ function renderCaderno(c){
   <button onclick="cadExportar('${aberta.id}','word')" class="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-3 py-2 rounded-lg text-sm font-bold">📝 Word</button>
   <button onclick="cadExportar('${aberta.id}','pdf')" class="bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-3 py-2 rounded-lg text-sm font-bold">🖨️ PDF / imprimir</button>`:''}
 </div>
-<p class="text-gray-500 text-sm mb-4">${aviso}</p>
+<p class="text-gray-500 text-sm mb-4">${aviso}${aberta.topicos.length>1?' Para mudar a ordem, arraste o tópico pela alça ⠿ ou use as setas ▲▼.':''}</p>
+${aberta.topicos.length>1?`<div class="relative mb-3 max-w-md">
+  <span class="absolute left-3 top-2.5 text-gray-400">🔎</span>
+  <input id="cad-filtro-top" type="search" value="${escHtml(cadFiltroTop)}" oninput="cadFiltrarTopicos(this.value)" placeholder="Pesquisar tópico neste caderno..."
+    class="w-full border-2 border-gray-300 rounded-lg py-2 pl-10 pr-3 focus:border-indigo-500 focus:outline-none">
+</div>
+<p id="cad-filtro-top-vazio" class="text-gray-400 text-sm mb-3 hidden">Nenhum tópico com esse nome.</p>`:''}
 ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-50 rounded-xl">Nenhum tópico ainda. Clique em "+ Novo tópico".</p>':`
 <ul class="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden" style="border-left:4px solid ${cor}">
   ${aberta.topicos.map((t,i)=>{
     const naJanela = cadQuillTopico===t.id && cadJanela && !cadJanela.closed;
-    return `<li class="flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-gray-50'}">
+    const oculto = cadFiltroTop && !cadNorm(t.nome).includes(cadNorm(cadFiltroTop));
+    const ult = aberta.topicos.length-1;
+    return `<li data-top-nome="${escHtml(cadNorm(t.nome))}" data-top-id="${t.id}" draggable="true"
+      ondragstart="cadArrastarIni(event,'${t.id}')" ondragover="cadArrastarSobre(event)" ondragleave="this.classList.remove('cad-alvo')" ondrop="cadSoltar(event,'${aberta.id}','${t.id}')" ondragend="cadArrastarFim()"
+      class="${oculto?'hidden ':''}flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-gray-50'}">
+      <span title="Arraste para mudar a ordem" class="cursor-grab text-gray-300 hover:text-gray-600 select-none flex-shrink-0">⠿</span>
+      <span class="flex flex-col flex-shrink-0 leading-none">
+        <button onclick="cadMoverTopico('${aberta.id}','${t.id}',-1)" title="Subir" ${i===0?'disabled':''} class="text-[10px] px-1 ${i===0?'text-gray-200':'text-gray-400 hover:text-indigo-700'}">▲</button>
+        <button onclick="cadMoverTopico('${aberta.id}','${t.id}',1)" title="Descer" ${i===ult?'disabled':''} class="text-[10px] px-1 ${i===ult?'text-gray-200':'text-gray-400 hover:text-indigo-700'}">▼</button>
+      </span>
       <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${i+1}.</span>
       <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
         <span class="font-semibold text-gray-800 break-words">${t.tipo==='html'?'🎨':'📄'} ${escHtml(t.nome)}</span>${t.tipo==='html'?'<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-bold">página importada · grifos e notas</span>':''}
@@ -1871,15 +1888,16 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
 <p class="text-gray-500 text-sm mb-4">Um caderno por matéria. Clique num caderno para ver os tópicos. ${aviso}</p>
 ${mats.length?`<div class="relative mb-5 max-w-md">
   <span class="absolute left-3 top-2.5 text-gray-400">🔎</span>
-  <input id="cad-filtro" type="search" value="${escHtml(cadFiltro)}" oninput="cadFiltrar(this.value)" placeholder="Filtrar cadernos pelo nome da matéria..."
+  <input id="cad-filtro" type="search" value="${escHtml(cadFiltro)}" oninput="cadFiltrar(this.value)" placeholder="Pesquisar caderno ou tópico..."
     class="w-full border-2 border-gray-300 rounded-lg py-2 pl-10 pr-3 focus:border-indigo-500 focus:outline-none">
 </div>`:''}
-<p id="cad-filtro-vazio" class="text-gray-400 text-sm mb-4 hidden">Nenhum caderno com esse nome.</p>
+<p id="cad-filtro-vazio" class="text-gray-400 text-sm mb-4 hidden">Nenhum caderno ou tópico com esse nome.</p>
 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-5">
   ${mats.map(m=>{
     const cor = cadCorCapa(m);
-    const oculto = cadFiltro && !cadNorm(m.nome).includes(cadNorm(cadFiltro));
-    return `<button data-cad-nome="${escHtml(cadNorm(m.nome))}" onclick="cadAbrirMateria('${m.id}')" class="${oculto?'hidden ':''}group relative aspect-[3/4] rounded-r-2xl rounded-l-md shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all text-left overflow-hidden"
+    const busca = cadNorm([m.nome, ...m.topicos.map(t=>t.nome)].join(' | '));
+    const oculto = cadFiltro && !busca.includes(cadNorm(cadFiltro));
+    return `<button data-cad-nome="${escHtml(busca)}" onclick="cadAbrirMateria('${m.id}')" class="${oculto?'hidden ':''}group relative aspect-[3/4] rounded-r-2xl rounded-l-md shadow-md hover:shadow-2xl hover:-translate-y-1 transition-all text-left overflow-hidden"
       style="background:linear-gradient(135deg,${cor},${cor}cc)">
       <div class="absolute left-0 top-0 bottom-0 w-4" style="background:repeating-linear-gradient(transparent 0 10px,rgba(255,255,255,.55) 10px 14px,transparent 14px 22px);border-right:2px solid rgba(0,0,0,.15)"></div>
       <div class="absolute left-7 right-3 top-6 bg-white rounded-md shadow p-2">
@@ -2220,6 +2238,56 @@ function cadGuardarEditor(){
 }
 
 function cadNorm(t){ return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
+// Mesma ideia da estante, para a lista de tópicos do caderno aberto
+function cadFiltrarTopicos(valor){
+  cadFiltroTop = valor;
+  const f = cadNorm(valor);
+  let visiveis = 0;
+  document.querySelectorAll('[data-top-nome]').forEach(el=>{
+    const ok = !f || el.dataset.topNome.includes(f);
+    el.classList.toggle('hidden', !ok);
+    if(ok) visiveis++;
+  });
+  document.getElementById('cad-filtro-top-vazio')?.classList.toggle('hidden', visiveis>0);
+}
+// ----- Ordem dos tópicos (setas ou arrastar) -----
+function cadMoverTopico(materiaId, topicoId, dir){
+  const m = cad().materias.find(x=>x.id===materiaId);
+  if(!m) return;
+  const i = m.topicos.findIndex(t=>t.id===topicoId), j = i + dir;
+  if(i<0 || j<0 || j>=m.topicos.length) return;
+  [m.topicos[i], m.topicos[j]] = [m.topicos[j], m.topicos[i]];
+  sv(); rend();
+}
+let cadArrastando = null;
+function cadArrastarIni(ev, id){
+  cadArrastando = id;
+  ev.dataTransfer.effectAllowed = 'move';
+  try{ ev.dataTransfer.setData('text/plain', id); }catch{}
+  ev.currentTarget.style.opacity = '.4';
+}
+function cadArrastarSobre(ev){
+  if(!cadArrastando) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  ev.currentTarget.classList.add('cad-alvo');
+}
+function cadArrastarFim(){
+  cadArrastando = null;
+  document.querySelectorAll('[data-top-id]').forEach(el=>{ el.style.opacity = ''; el.classList.remove('cad-alvo'); });
+}
+function cadSoltar(ev, materiaId, alvoId){
+  ev.preventDefault();
+  const id = cadArrastando;
+  cadArrastarFim();
+  const m = cad().materias.find(x=>x.id===materiaId);
+  if(!m || !id || id===alvoId) return;
+  const de = m.topicos.findIndex(t=>t.id===id), para = m.topicos.findIndex(t=>t.id===alvoId);
+  if(de<0 || para<0) return;
+  const [t] = m.topicos.splice(de, 1);
+  m.topicos.splice(para, 0, t); // fica no lugar de quem estava ali (descendo: logo depois dele; subindo: logo antes)
+  sv(); rend();
+}
 // Filtra a estante sem redesenhar a tela (assim o campo não perde o foco enquanto digita)
 function cadFiltrar(valor){
   cadFiltro = valor;
@@ -2731,7 +2799,7 @@ async function cadBaixarPagina(id){
   setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
 }
 
-function cadAbrirMateria(id){ cadMatAberta = id; rend(); }
+function cadAbrirMateria(id){ cadMatAberta = id; cadFiltroTop = ''; rend(); }
 function cadVoltar(){ cadMatAberta = null; rend(); }
 function cadAddMateria(){
   const nome = (prompt('Nome do caderno (matéria):')||'').trim();
@@ -3809,6 +3877,12 @@ ${svgChartPomodoros(14)}
   window.cadAbrirMateria = cadAbrirMateria;
   window.cadVoltar = cadVoltar;
   window.cadFiltrar = cadFiltrar;
+  window.cadFiltrarTopicos = cadFiltrarTopicos;
+  window.cadMoverTopico = cadMoverTopico;
+  window.cadArrastarIni = cadArrastarIni;
+  window.cadArrastarSobre = cadArrastarSobre;
+  window.cadArrastarFim = cadArrastarFim;
+  window.cadSoltar = cadSoltar;
   window.cadExportar = cadExportar;
   window.cadImportarPagina = cadImportarPagina;
   window.cadBaixarPagina = cadBaixarPagina;
