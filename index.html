@@ -316,6 +316,94 @@ function novoCronograma(){
   sv();rend();
   ntf(`📁 ${nome} criado!`);
 }
+// Lê um plano em texto:
+//   CRONOGRAMA X — NOME DO PLANO      (1ª linha: nome)
+//   1. Matéria (11)                    (matéria; o número entre parênteses é opcional)
+//   - Conteúdo                         (conteúdos da matéria)
+function lerPlanoTexto(texto){
+  const plano = {nome:'', materias:[]};
+  let atual = null;
+  texto.split(/\r?\n/).forEach(bruta=>{
+    const l = bruta.trim();
+    if(!l) return;
+    const ct = /^[-•*–]\s*(.+)$/.exec(l);
+    if(ct){
+      if(!atual){ atual = {nome:'Geral', conteudos:[]}; plano.materias.push(atual); }
+      atual.conteudos.push(ct[1].trim());
+      return;
+    }
+    const ma = /^\d+\s*[.)]\s*(.+?)(?:\s*\(\d+\))?$/.exec(l);
+    if(ma){ atual = {nome:ma[1].trim(), conteudos:[]}; plano.materias.push(atual); return; }
+    if(!plano.nome && !plano.materias.length) plano.nome = l.replace(/^cronograma\s+\S+\s*[—–-]\s*/i, '').trim() || l;
+  });
+  return plano;
+}
+function importarPlanoTexto(){
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:640px;max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold mb-1">📥 Importar plano (texto)</h3>
+        <p class="text-sm text-gray-500 mb-3">Cria as matérias com a lista de conteúdos de cada uma, para ir marcando o que já estudou.</p>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 mb-3 font-mono leading-relaxed">CRONOGRAMA Y — TJ-SP 2027<br>1. Processo Civil (12)<br>- CPC arts. 1–11<br>- CPC arts. 70–85<br>2. Direito Penal (6)<br>- CP arts. 1–12</div>
+        <textarea id="pl-texto" rows="10" placeholder="Cole aqui o plano" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"></textarea>
+        <label class="text-xs text-indigo-700 font-semibold cursor-pointer hover:underline">📎 ou carregar arquivo .txt
+          <input id="pl-arquivo" type="file" accept=".txt,text/plain" class="hidden">
+        </label>
+        <div id="pl-previa" class="text-sm text-gray-600 mt-3"></div>
+        <label class="block text-sm font-semibold text-gray-700 mt-3 mb-1">Nome do cronograma</label>
+        <input id="pl-nome" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none">
+        <label class="flex items-center gap-2 mt-3 text-sm text-gray-600 cursor-pointer select-none">
+          <input id="pl-atual" type="checkbox" class="w-4 h-4 accent-indigo-600">
+          <span>Adicionar ao cronograma atual (<b>${escHtml(currentC().nome)}</b>) em vez de criar um novo</span>
+        </label>
+        <div class="flex gap-3 mt-5">
+          <button id="pl-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="pl-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Importar</button>
+        </div>
+      </div>
+    </div>`;
+  const txt = document.getElementById('pl-texto'), nomeEl = document.getElementById('pl-nome');
+  let nomeMexido = false;
+  nomeEl.addEventListener('input', ()=>{ nomeMexido = true; });
+  const previa = () => {
+    const pl = lerPlanoTexto(txt.value);
+    if(!nomeMexido) nomeEl.value = pl.nome;
+    const n = pl.materias.reduce((s,m)=>s+m.conteudos.length,0);
+    document.getElementById('pl-previa').innerHTML = pl.materias.length
+      ? `<p class="font-bold text-gray-700 mb-1">${pl.materias.length} matérias · ${n} conteúdos</p><ul class="text-xs text-gray-500 list-disc pl-5 max-h-40 overflow-y-auto">${pl.materias.map(m=>`<li>${escHtml(m.nome)} — ${m.conteudos.length}</li>`).join('')}</ul>`
+      : '';
+  };
+  txt.addEventListener('input', previa);
+  document.getElementById('pl-arquivo').onchange = async ev => {
+    const f = ev.target.files[0];
+    if(!f) return;
+    txt.value = await f.text(); previa();
+  };
+  document.getElementById('pl-cancelar').onclick = () => { document.getElementById('modal-root').innerHTML=''; };
+  document.getElementById('pl-salvar').onclick = () => {
+    const pl = lerPlanoTexto(txt.value);
+    const materias = pl.materias.filter(m=>m.conteudos.length);
+    if(!materias.length){ ntf('❌ Não achei matérias com conteúdos. Use "1. Matéria" e "- conteúdo".','er'); return; }
+    let c;
+    if(document.getElementById('pl-atual').checked) c = currentC();
+    else {
+      const nome = nomeEl.value.trim() || 'Novo cronograma';
+      c = novoCronogramaObj(nome);
+      e.cronogramas.push(c);
+      e.currentCronoId = c.id;
+    }
+    materias.forEach((pm,k)=>{
+      const m = {id:'m'+Date.now()+k+Math.random().toString(36).substr(2,4), ma:pm.nome, aulasTotal:0, aulasConcluidas:0, concluido:false,
+        conteudos: pm.conteudos.map((nome,i)=>({id:'ct'+Date.now().toString(36)+k+'x'+i+Math.random().toString(36).slice(2,5), nome, feito:null}))};
+      sincConteudos(m);
+      c.cron.push(m);
+    });
+    document.getElementById('modal-root').innerHTML='';
+    e.aba = 'plano'; planoMatAberta = null;
+    sv(); rend();
+    ntf(`📥 ${materias.length} matérias importadas em ${c.nome}!`);
+  };
+}
 function renomearCronograma(){
   const c = currentC();
   const nome = prompt('Novo nome do cronograma:', c.nome);
@@ -342,12 +430,18 @@ function addMateria(){
   const nome = nomeEl.value.trim();
   const aulas = parseInt(aulasEl.value)||0;
   const extra = !!(extraEl && extraEl.checked);
-  if(!nome || aulas<=0){ntf('❌ Informe o nome da matéria e a quantidade de aulas','er');return;}
+  if(!nome){ntf('❌ Informe o nome da matéria','er');return;}
   const c = currentC();
   const m = {id:'m'+Date.now()+Math.random().toString(36).substr(2,4), ma:nome, aulasTotal:aulas, aulasConcluidas:0, concluido:false};
   if(extra) m.extra = true;
+  if(aulas<=0){ m.aulasTotal = 0; m.conteudos = []; } // matéria por conteúdos: o total vem da lista
   c.cron.push(m);
   nomeEl.value=''; aulasEl.value='';
+  if(m.conteudos){
+    sv(); abrirConteudos(m.id);
+    ntf(`📑 ${nome} criada! Agora adicione os conteúdos.`);
+    return;
+  }
   sv();rend();
   ntf(extra ? `⭐ ${nome} adicionada como extra! Use "Atualizar agenda" para incluí-la na agenda.` : `✅ ${nome} adicionada ao ${c.nome}!`);
 }
@@ -806,11 +900,164 @@ function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas='', extra=false){
   });
 }
 
+// ===== MATÉRIA POR CONTEÚDOS =====
+// Em vez de "quantidade de aulas", a matéria tem uma lista de conteúdos que vão sendo marcados.
+// aulasTotal/aulasConcluidas acompanham a lista, então porcentagem, agenda e plano continuam valendo.
+let planoMatAberta = null;   // matéria com a lista de conteúdos aberta (só navegação)
+let planoAgendaKey = null;   // veio da agenda: marca o dia como feito ao concluir um conteúdo
+function matConteudosAberta(c){
+  const m = planoMatAberta && c.cron.find(x=>x.id===planoMatAberta);
+  return m && Array.isArray(m.conteudos) ? m : null;
+}
+function abrirConteudos(id, agendaKey){
+  planoMatAberta = id; planoAgendaKey = agendaKey || null;
+  e.aba = 'plano'; rend(); window.scrollTo({top:0});
+}
+function fecharConteudos(){ planoMatAberta = null; planoAgendaKey = null; rend(); }
+function sincConteudos(m){
+  m.aulasTotal = m.conteudos.length;
+  m.aulasConcluidas = m.conteudos.filter(x=>x.feito).length;
+  m.concluido = m.aulasTotal>0 && m.aulasConcluidas===m.aulasTotal;
+}
+function tituloMateria(item, nome){
+  return Array.isArray(item.conteudos)
+    ? `<button onclick="abrirConteudos('${item.id}')" class="text-left hover:text-indigo-700 hover:underline">${escHtml(nome)}</button>`
+    : nome;
+}
+function selosMateria(item){
+  if(Array.isArray(item.conteudos)) return `
+        <button onclick="abrirConteudos('${item.id}')" class="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-2 py-1 rounded font-bold">📑 ${item.aulasTotal} conteúdos ›</button>
+        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${item.aulasConcluidas} feitos</span>
+        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${item.aulasTotal-item.aulasConcluidas} restantes</span>`;
+  return `
+        <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">📚 ${item.aulasTotal} aulas</span>
+        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${item.aulasConcluidas} feitas</span>
+        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${item.aulasTotal-item.aulasConcluidas} restantes</span>`;
+}
+function renderConteudos(c, m){
+  const total = m.conteudos.length, feitos = m.conteudos.filter(x=>x.feito).length;
+  const pct = total ? Math.round(feitos/total*100) : 0;
+  const ult = total-1;
+  return `
+<div class="flex items-center gap-3 mb-4 flex-wrap">
+  <button onclick="fecharConteudos()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold">← Plano</button>
+  <h2 class="text-2xl font-bold flex-1 break-words">${m.extra?'⭐ ':''}📑 ${escHtml(m.ma)}</h2>
+  <button onclick="renomearMateriaConteudos('${m.id}')" class="text-sm text-gray-500 hover:text-gray-800">✏️ Renomear</button>
+</div>
+${planoAgendaKey?'<p class="bg-indigo-50 border border-indigo-200 text-indigo-800 text-sm rounded-lg px-3 py-2 mb-4">🗓️ Veio da agenda: marque o conteúdo que você estudou hoje e o dia fica como feito.</p>':''}
+<div class="bg-gray-50 rounded-xl p-4 mb-5">
+  <div class="flex justify-between items-end mb-2 flex-wrap gap-2">
+    <p class="font-bold text-gray-700">${feitos} de ${total} conteúdos estudados</p>
+    <p class="text-2xl font-bold ${pct===100?'text-green-600':'text-indigo-700'}">${pct}%</p>
+  </div>
+  <div class="w-full bg-gray-200 rounded-full h-3"><div class="${pct===100?'bg-green-500':'bg-indigo-500'} h-3 rounded-full transition-all" style="width:${pct}%"></div></div>
+  <p class="text-xs text-gray-400 mt-2">Ao marcar um conteúdo, as revisões dele são agendadas (7, 14, 30 e 60 dias).${m.extra?' Matéria extra: não conta na porcentagem do plano.':''}</p>
+</div>
+<div class="bg-white border-2 border-dashed border-indigo-200 rounded-xl p-4 mb-5">
+  <label class="block text-sm font-bold text-gray-700 mb-1">➕ Adicionar conteúdos</label>
+  <p class="text-xs text-gray-500 mb-2">Um por linha. Dá para colar a lista inteira do edital de uma vez.</p>
+  <textarea id="novos-conteudos" rows="${total?3:7}" placeholder="Ex:&#10;Concordância verbal&#10;Concordância nominal&#10;Regência verbal" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none"></textarea>
+  <button onclick="addConteudos('${m.id}')" class="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-bold text-sm">Adicionar</button>
+</div>
+${total===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-xl">Nenhum conteúdo ainda.</p>':`
+<ul class="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+  ${m.conteudos.map((ct,i)=>`<li class="flex items-center gap-2 px-3 py-2 ${ct.feito?'bg-green-50':'hover:bg-gray-50'}">
+    <span class="flex flex-col flex-shrink-0 leading-none">
+      <button onclick="moverConteudo('${m.id}','${ct.id}',-1)" title="Subir" ${i===0?'disabled':''} class="text-[10px] px-1 ${i===0?'text-gray-200':'text-gray-400 hover:text-indigo-700'}">▲</button>
+      <button onclick="moverConteudo('${m.id}','${ct.id}',1)" title="Descer" ${i===ult?'disabled':''} class="text-[10px] px-1 ${i===ult?'text-gray-200':'text-gray-400 hover:text-indigo-700'}">▼</button>
+    </span>
+    <span class="text-xs text-gray-400 w-7 text-right flex-shrink-0">${i+1}.</span>
+    <label class="flex items-center gap-3 flex-1 min-w-0 cursor-pointer py-1">
+      <input type="checkbox" ${ct.feito?'checked':''} onchange="toggleConteudo('${m.id}','${ct.id}')" class="w-5 h-5 accent-green-600 flex-shrink-0">
+      <span class="break-words ${ct.feito?'line-through text-gray-400':'text-gray-800 font-medium'}">${escHtml(ct.nome)}</span>
+    </label>
+    ${ct.feito?`<span class="text-xs text-green-700 font-bold flex-shrink-0" title="Estudado em">✅ ${ct.feito.slice(0,5)}</span>`:''}
+    <button onclick="editarConteudo('${m.id}','${ct.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
+    <button onclick="delConteudo('${m.id}','${ct.id}')" title="Excluir" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
+  </li>`).join('')}
+</ul>`}
+<div class="mt-6 text-right"><button onclick="delMateria('${m.id}')" class="text-red-500 hover:text-red-700 text-xs font-bold">remover matéria</button></div>`;
+}
+function acharConteudo(mId, cId){
+  const c = currentC();
+  const m = c.cron.find(x=>x.id===mId);
+  const ct = m && Array.isArray(m.conteudos) ? m.conteudos.find(x=>x.id===cId) : null;
+  return {c, m, ct};
+}
+function addConteudos(mId){
+  const c = currentC();
+  const m = c.cron.find(x=>x.id===mId);
+  if(!m) return;
+  const linhas = document.getElementById('novos-conteudos').value.split('\n')
+    .map(l=>l.replace(/^\s*[-•*–]\s*/, '').trim()).filter(Boolean);
+  if(!linhas.length){ ntf('❌ Escreva ao menos um conteúdo','er'); return; }
+  linhas.forEach(nome=>m.conteudos.push({id:'ct'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), nome, feito:null}));
+  sincConteudos(m);
+  sv(); rend();
+  ntf(`✅ ${linhas.length} conteúdo(s) adicionado(s)!`);
+}
+// desfaz o "estudei": tira do progresso e apaga as revisões ainda não feitas
+function desfazerConteudo(c, m, ct){
+  if(!ct.feito) return;
+  ct.feito = null;
+  if(!m.extra) c.stats.a = Math.max(0, c.stats.a - 1);
+  c.revs = c.revs.filter(r=>!(r.di===ct.id && r.s==='p'));
+}
+function toggleConteudo(mId, cId){
+  const {c, m, ct} = acharConteudo(mId, cId);
+  if(!ct) return;
+  if(ct.feito){
+    desfazerConteudo(c, m, ct);
+    sincConteudos(m); sv(); rend();
+    return;
+  }
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  ct.feito = fmtDMY(hoje);
+  if(!m.extra) c.stats.a += 1;
+  c.stats.d++;
+  const n = m.conteudos.indexOf(ct) + 1;
+  c.dias.push({id:ct.id, dt:hoje.toLocaleDateString('pt-BR'), ma:m.ma, i:n, f:n, q:1, titulo:ct.nome});
+  gerarRevisoes(ct.id, m.ma, n, n, 1, hoje, ct.nome, !!m.extra);
+  if(planoAgendaKey){ c.agendaConcluidos[planoAgendaKey] = true; planoAgendaKey = null; }
+  sincConteudos(m); sv(); rend();
+  ntf(m.concluido ? `🏆 ${m.ma} concluída!` : `🎉 Conteúdo estudado! Revisões agendadas.`);
+}
+function moverConteudo(mId, cId, dir){
+  const {m, ct} = acharConteudo(mId, cId);
+  if(!ct) return;
+  const i = m.conteudos.indexOf(ct), j = i + dir;
+  if(j<0 || j>=m.conteudos.length) return;
+  [m.conteudos[i], m.conteudos[j]] = [m.conteudos[j], m.conteudos[i]];
+  sv(); rend();
+}
+function editarConteudo(mId, cId){
+  const {ct} = acharConteudo(mId, cId);
+  if(!ct) return;
+  const nome = (prompt('Nome do conteúdo:', ct.nome)||'').trim();
+  if(!nome) return;
+  ct.nome = nome; sv(); rend();
+}
+function delConteudo(mId, cId){
+  const {c, m, ct} = acharConteudo(mId, cId);
+  if(!ct || !confirm(`Excluir "${ct.nome}"?`)) return;
+  desfazerConteudo(c, m, ct);
+  m.conteudos = m.conteudos.filter(x=>x!==ct);
+  sincConteudos(m); sv(); rend();
+}
+function renomearMateriaConteudos(mId){
+  const m = currentC().cron.find(x=>x.id===mId);
+  if(!m) return;
+  const nome = (prompt('Nome da matéria:', m.ma)||'').trim();
+  if(!nome) return;
+  m.ma = nome; sv(); rend();
+}
+
 // Abre modal para registrar estudo
 function registrarAulas(id, agendaKey){
   const c = currentC();
   const item = c.cron.find(x=>x.id===id);
   if(!item) return;
+  if(Array.isArray(item.conteudos)){ abrirConteudos(id, agendaKey); return; }
   const restante = item.aulasTotal - item.aulasConcluidas;
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const sug = addDias(hoje,7);
@@ -3417,6 +3664,7 @@ function rend(){
     ${e.cronogramas.map(cr=>`<option value="${cr.id}" ${cr.id===e.currentCronoId?'selected':''}>${cr.nome}</option>`).join('')}
   </select>
   <button onclick="novoCronograma()" class="bg-indigo-100 text-indigo-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-200">+ Novo</button>
+  <button onclick="importarPlanoTexto()" title="Criar um cronograma a partir de uma lista de matérias e conteúdos (texto)" class="bg-indigo-100 text-indigo-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-indigo-200">📥 Importar plano (texto)</button>
   <button onclick="renomearCronograma()" class="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold hover:bg-gray-200">✏️ Renomear</button>
   ${e.cronogramas.length>1?`<button onclick="excluirCronograma()" class="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-bold hover:bg-red-100">🗑️ Excluir</button>`:''}
 </div>
@@ -3444,7 +3692,7 @@ function rend(){
 
 <div class="bg-white rounded-b-2xl shadow-xl p-6 mb-6">
 
-${e.aba==='plano'?`
+${e.aba==='plano'?(matConteudosAberta(c)?renderConteudos(c, matConteudosAberta(c)):`
 <h2 class="text-2xl font-bold mb-4">📋 Plano de Estudo — ${c.nome}</h2>
 
 <div class="bg-gray-50 rounded-xl p-4 mb-8">
@@ -3458,6 +3706,9 @@ ${e.aba==='plano'?`
       <label class="block text-xs font-bold text-gray-500 mb-1">Qtd. de aulas</label>
       <input id="nova-materia-aulas" type="number" min="1" placeholder="Ex: 40" class="w-28 border-2 border-gray-300 rounded-lg p-2 focus:border-indigo-500 focus:outline-none">
     </div>
+    <div class="text-xs text-gray-400 self-center max-w-[180px] leading-snug">
+      ou deixe vazio para montar uma <b class="text-indigo-600">lista de conteúdos</b> e ir marcando o que já estudou
+    </div>
     <button onclick="addMateria()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-lg font-bold">Adicionar</button>
   </div>
   <label class="flex items-center gap-2 mt-3 text-sm text-gray-600 cursor-pointer select-none">
@@ -3470,15 +3721,13 @@ ${e.aba==='plano'?`
 <h3 class="text-xl font-bold text-yellow-700 mb-4">⏳ Pendentes (${pendentes.length})</h3>
 ${pendentes.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nenhuma matéria pendente. Adicione matérias acima.</p>':`<div class="grid md:grid-cols-2 gap-3">
 ${pendentes.map(item=>{
-  const pct = Math.round(item.aulasConcluidas/item.aulasTotal*100);
+  const pct = item.aulasTotal ? Math.round(item.aulasConcluidas/item.aulasTotal*100) : 0;
   return `<div class="border-2 border-yellow-300 bg-yellow-50 rounded-xl p-4 hover:shadow-lg transition-all">
   <div class="flex justify-between items-start gap-3 mb-3">
     <div class="flex-1 min-w-0">
-      <h4 class="font-bold text-gray-800 break-words mb-1">${item.ma}</h4>
+      <h4 class="font-bold text-gray-800 break-words mb-1">${tituloMateria(item, item.ma)}</h4>
       <div class="flex gap-2 text-xs flex-wrap">
-        <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">📚 ${item.aulasTotal} aulas</span>
-        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${item.aulasConcluidas} feitas</span>
-        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${item.aulasTotal-item.aulasConcluidas} restantes</span>
+        ${selosMateria(item)}
       </div>
     </div>
     <div class="flex flex-col gap-1 flex-shrink-0">
@@ -3501,19 +3750,17 @@ ${extras.length>0?`
 <p class="text-xs text-gray-500 mb-4">Para estudar depois das matérias do dia. Não entram na porcentagem do plano.</p>
 <div class="grid md:grid-cols-2 gap-3">
 ${extras.map(item=>{
-  const pct = Math.round(item.aulasConcluidas/item.aulasTotal*100);
+  const pct = item.aulasTotal ? Math.round(item.aulasConcluidas/item.aulasTotal*100) : 0;
   return `<div class="border-2 border-fuchsia-300 ${item.concluido?'bg-green-50 opacity-70':'bg-fuchsia-50'} rounded-xl p-4 hover:shadow-lg transition-all">
   <div class="flex justify-between items-start gap-3 mb-3">
     <div class="flex-1 min-w-0">
-      <h4 class="font-bold text-gray-800 break-words mb-1 ${item.concluido?'line-through':''}">⭐ ${item.ma}</h4>
+      <h4 class="font-bold text-gray-800 break-words mb-1 ${item.concluido?'line-through':''}">⭐ ${tituloMateria(item, item.ma)}</h4>
       <div class="flex gap-2 text-xs flex-wrap">
-        <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded font-bold">📚 ${item.aulasTotal} aulas</span>
-        <span class="bg-green-100 text-green-700 px-2 py-1 rounded">✅ ${item.aulasConcluidas} feitas</span>
-        <span class="bg-gray-100 text-gray-600 px-2 py-1 rounded">⏳ ${item.aulasTotal-item.aulasConcluidas} restantes</span>
+        ${selosMateria(item)}
       </div>
     </div>
     <div class="flex flex-col gap-1 flex-shrink-0">
-      ${item.concluido?'<span class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-bold">✓ Feito</span>':`<button onclick="registrarAulas('${item.id}')" class="bg-fuchsia-600 hover:bg-fuchsia-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap shadow-md">+ Estudei</button>`}
+      ${item.concluido&&!Array.isArray(item.conteudos)?'<span class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-bold">✓ Feito</span>':`<button onclick="registrarAulas('${item.id}')" class="bg-fuchsia-600 hover:bg-fuchsia-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold whitespace-nowrap shadow-md">+ Estudei</button>`}
       <button onclick="delMateria('${item.id}')" class="text-red-500 hover:text-red-700 text-xs font-bold">remover</button>
     </div>
   </div>
@@ -3534,15 +3781,15 @@ ${concluidas.map(item=>`
 <div class="border-2 border-green-300 bg-green-50 rounded-xl p-4">
   <div class="flex justify-between items-start gap-3">
     <div class="flex-1 min-w-0">
-      <h4 class="font-bold text-gray-800 line-through opacity-60 break-words mb-1">${item.ma}</h4>
-      <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">📚 ${item.aulasTotal} aulas</span>
+      <h4 class="font-bold text-gray-800 line-through opacity-60 break-words mb-1">${tituloMateria(item, item.ma)}</h4>
+      <span class="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">${Array.isArray(item.conteudos)?`📑 ${item.aulasTotal} conteúdos`:`📚 ${item.aulasTotal} aulas`}</span>
     </div>
     <span class="bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex-shrink-0">✓ Feito</span>
   </div>
 </div>`).join('')}
 </div>
 </details>`:''}
-`:''}
+`):''}
 
 ${e.aba==='agenda'?`
 <h2 class="text-2xl font-bold mb-2">🗓️ Agenda mesclada — ${c.nome}</h2>
@@ -3656,8 +3903,8 @@ ${grupo.itens.map((r,i)=>`  <div class="${i>0?'border-t border-gray-100 pt-4':''
         <div class="flex gap-2 flex-wrap text-xs mb-3">
           <span class="bg-${r.cor}-100 text-${r.cor}-700 px-3 py-1 rounded-lg font-bold">${r.t}</span>
           ${r.analise?`<span class="bg-rose-100 text-rose-700 px-3 py-1 rounded font-bold">❓ Questão errada</span>`:r.material?`<span class="bg-purple-100 text-purple-700 px-3 py-1 rounded font-bold">📄 Material de revisão</span>`:`
-          <span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
-          <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>`}
+          ${String(r.di).startsWith('ct')?`<span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">📑 Conteúdo ${r.i}</span>`:`<span class="bg-indigo-100 text-indigo-700 px-3 py-1 rounded">Aulas ${r.i}-${r.f}</span>
+          <span class="bg-gray-100 text-gray-700 px-3 py-1 rounded">${r.q} aulas</span>`}`}
         </div>
         ${r.analise?`<p class="text-sm text-gray-700 mb-2">${escHtml(r.titulo)}</p><button onclick="editarObsAnalise(${r.analise},'${r.id}')" class="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg text-sm font-bold">❓ Ver questão e observações</button>`:r.material?`<p class="text-sm text-gray-700 mb-2">${escHtml(r.titulo)}</p><button onclick="abrirMaterial(${r.material},'${r.id}')" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-bold">📖 Abrir material</button>`:r.titulo?`<div class="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2"><p class="text-xs font-bold text-blue-800 mb-1">📝 Conteúdo:</p><p class="text-sm text-blue-900 whitespace-pre-wrap">${r.titulo}</p></div>`:''}
       </div>
@@ -3677,7 +3924,7 @@ ${completasSemana.length>0?`<div>
 ${grupo.itens.map(r=>`  <div>
     <h4 class="font-bold line-through text-gray-700">${r.ma}</h4>
     <div class="flex gap-2 text-xs mt-1">
-      <span class="bg-gray-100 px-2 py-1 rounded">${r.analise?'❓ Questão':r.material?'📄 Material':`Aulas ${r.i}-${r.f}`}</span>
+      <span class="bg-gray-100 px-2 py-1 rounded">${r.analise?'❓ Questão':r.material?'📄 Material':String(r.di).startsWith('ct')?`📑 Conteúdo ${r.i}`:`Aulas ${r.i}-${r.f}`}</span>
       <span class="bg-green-100 text-green-700 px-2 py-1 rounded">${r.t}</span>
       ${r.extra?'<span class="bg-fuchsia-100 text-fuchsia-700 px-2 py-1 rounded font-bold">⭐ extra</span>':''}
     </div>
@@ -3883,6 +4130,15 @@ ${svgChartPomodoros(14)}
   window.cadArrastarSobre = cadArrastarSobre;
   window.cadArrastarFim = cadArrastarFim;
   window.cadSoltar = cadSoltar;
+  window.abrirConteudos = abrirConteudos;
+  window.fecharConteudos = fecharConteudos;
+  window.addConteudos = addConteudos;
+  window.toggleConteudo = toggleConteudo;
+  window.moverConteudo = moverConteudo;
+  window.editarConteudo = editarConteudo;
+  window.delConteudo = delConteudo;
+  window.renomearMateriaConteudos = renomearMateriaConteudos;
+  window.importarPlanoTexto = importarPlanoTexto;
   window.cadExportar = cadExportar;
   window.cadImportarPagina = cadImportarPagina;
   window.cadBaixarPagina = cadBaixarPagina;
