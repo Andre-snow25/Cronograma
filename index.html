@@ -3771,9 +3771,41 @@ function pdsDe(lista){
   return Math.round(lista.reduce((s,p)=>s+(p.min||25),0)/(POMO_DURACAO/60)*10)/10;
 }
 function fmtPD(v){ return String(v).replace('.',','); }
+// Estatísticas do Foco: só do cronograma atual ou somando todos
+function pdEscopo(){ try{ return localStorage.getItem('pdEscopo')==='todos' ? 'todos' : 'plano'; }catch{ return 'plano'; } }
+function setPdEscopo(v){ try{ localStorage.setItem('pdEscopo', v); }catch{} rend(); }
+function pdLista(cr){
+  if(cr) return cr.pomodoros||[];
+  return pdEscopo()==='todos' ? e.cronogramas.flatMap(x=>x.pomodoros||[]) : currentC().pomodoros;
+}
+// quanto cada cronograma estudou (para a visão geral)
+function pdResumoPorPlano(){
+  const hj = fmtDMY(new Date()), sem = diasAtras(7);
+  const linhas = e.cronogramas.map(cr=>{
+    const l = pdLista(cr);
+    return {cr, hoje:pdsDe(l.filter(p=>p.data===hj)), semana:pdsDe(l.filter(p=>sem.includes(p.data))), total:pdsDe(l)};
+  });
+  const tot = linhas.reduce((s,x)=>s+x.total,0);
+  return `<div class="bg-gray-50 rounded-xl p-4 mb-8 overflow-x-auto">
+<h3 class="font-bold text-gray-700 mb-3">📁 PDs por cronograma</h3>
+<table class="w-full text-sm min-w-[420px]">
+  <thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1">Cronograma</th><th class="py-1 text-right">Hoje</th><th class="py-1 text-right">7 dias</th><th class="py-1 text-right">Total</th><th class="py-1 pl-4 w-1/3">Parte do total</th></tr></thead>
+  <tbody>${linhas.map(x=>{
+    const pct = tot ? Math.round(x.total/tot*100) : 0;
+    return `<tr class="border-t border-gray-200 ${x.cr.id===e.currentCronoId?'font-bold':''}">
+      <td class="py-2">${escHtml(x.cr.nome)}</td>
+      <td class="py-2 text-right tabular-nums">${fmtPD(x.hoje)}</td>
+      <td class="py-2 text-right tabular-nums">${fmtPD(x.semana)}</td>
+      <td class="py-2 text-right tabular-nums">${fmtPD(x.total)}</td>
+      <td class="py-2 pl-4"><div class="flex items-center gap-2"><div class="flex-1 bg-gray-200 rounded-full h-2"><div class="bg-orange-500 h-2 rounded-full" style="width:${pct}%"></div></div><span class="text-xs text-gray-500 w-9 text-right">${pct}%</span></div></td>
+    </tr>`;
+  }).join('')}</tbody>
+</table>
+</div>`;
+}
 function pomodorosPorDia(n=14){
   const dias=diasAtras(n);
-  const pds=currentC().pomodoros;
+  const pds=pdLista();
   return dias.map(d=>{
     const qtd=pdsDe(pds.filter(p=>p.data===d));
     return {data:d,qtd,rotulo:fmtPD(qtd)};
@@ -3781,18 +3813,18 @@ function pomodorosPorDia(n=14){
 }
 function pomodorosHoje(){
   const hj=fmtDMY(new Date());
-  return fmtPD(pdsDe(currentC().pomodoros.filter(p=>p.data===hj)));
+  return fmtPD(pdsDe(pdLista().filter(p=>p.data===hj)));
 }
 function pomodorosSemana(){
   const dias=diasAtras(7);
-  return fmtPD(pdsDe(currentC().pomodoros.filter(p=>dias.includes(p.data))));
+  return fmtPD(pdsDe(pdLista().filter(p=>dias.includes(p.data))));
 }
 function pomodorosTotal(){
-  return fmtPD(pdsDe(currentC().pomodoros));
+  return fmtPD(pdsDe(pdLista()));
 }
 function minutosSemana(){
   const dias=diasAtras(7);
-  return currentC().pomodoros.filter(p=>dias.includes(p.data)).reduce((s,p)=>s+(p.min||25),0);
+  return pdLista().filter(p=>dias.includes(p.data)).reduce((s,p)=>s+(p.min||25),0);
 }
 
 // Gráfico de barras (SVG) genérico
@@ -4377,6 +4409,13 @@ ${(()=>{
 </div>`;
 })()}
 
+${e.cronogramas.length>1?`<div class="flex items-center gap-2 mb-4 flex-wrap">
+  <span class="text-sm font-bold text-gray-500">📊 Estatísticas de:</span>
+  <div class="inline-flex rounded-lg border-2 border-gray-200 overflow-hidden text-sm font-bold">
+    <button onclick="setPdEscopo('plano')" class="px-4 py-2 ${pdEscopo()==='plano'?'bg-orange-500 text-white':'bg-white text-gray-600 hover:bg-gray-50'}">📁 ${escHtml(c.nome)}</button>
+    <button onclick="setPdEscopo('todos')" class="px-4 py-2 border-l-2 border-gray-200 ${pdEscopo()==='todos'?'bg-orange-500 text-white':'bg-white text-gray-600 hover:bg-gray-50'}">📚 Todos os cronogramas</button>
+  </div>
+</div>`:''}
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
 <div class="bg-gradient-to-br from-orange-100 to-orange-200 p-4 rounded-xl"><p class="text-sm font-bold text-orange-900 mb-1">📅 PDs hoje</p><p class="text-3xl font-bold text-orange-700">${pomodorosHoje()}</p></div>
 <div class="bg-gradient-to-br from-amber-100 to-amber-200 p-4 rounded-xl"><p class="text-sm font-bold text-amber-900 mb-1">📆 PDs 7 dias</p><p class="text-3xl font-bold text-amber-700">${pomodorosSemana()}</p></div>
@@ -4384,10 +4423,11 @@ ${(()=>{
 <div class="bg-gradient-to-br from-red-100 to-red-200 p-4 rounded-xl"><p class="text-sm font-bold text-red-900 mb-1">🎯 PDs no total</p><p class="text-3xl font-bold text-red-700">${pomodorosTotal()}</p></div>
 </div>
 
-<div class="bg-gray-50 rounded-xl p-4">
-<h3 class="font-bold text-gray-700 mb-3">📊 PDs concluídos — últimos 14 dias</h3>
+<div class="bg-gray-50 rounded-xl p-4 ${e.cronogramas.length>1&&pdEscopo()==='todos'?'mb-8':''}">
+<h3 class="font-bold text-gray-700 mb-3">📊 PDs concluídos — últimos 14 dias${e.cronogramas.length>1?` <span class="text-sm font-normal text-gray-500">(${pdEscopo()==='todos'?'todos os cronogramas':escHtml(c.nome)})</span>`:''}</h3>
 ${svgChartPomodoros(14)}
 </div>
+${e.cronogramas.length>1&&pdEscopo()==='todos'?pdResumoPorPlano():''}
 `:''}
 
 </div>`;
@@ -4458,6 +4498,7 @@ ${svgChartPomodoros(14)}
   window.importarAgendaTexto = importarAgendaTexto;
   window.agAlternarJuntos = agAlternarJuntos;
   window.agRemover = agRemover;
+  window.setPdEscopo = setPdEscopo;
   window.agMarcarConteudo = agMarcarConteudo;
   window.agMarcarAtiv = agMarcarAtiv;
   window.cadMudarPlano = cadMudarPlano;
