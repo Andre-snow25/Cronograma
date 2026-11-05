@@ -888,8 +888,8 @@ function ajustarTodasSequencias(){
 }
 
 // Gera as 4 revisões a partir da data escolhida pelo usuário (sem limite por dia)
-function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas='', extra=false){
-  const c = currentC();
+function gerarRevisoes(dsId, ma, de, ate, qtd, data1, notas='', extra=false, cr=null){
+  const c = cr || currentC();
   INTERVALOS_REV.forEach(({t,dias,cor})=>{
     const r = {
       id:`${dsId}-${t}-${Math.random().toString(36).substr(2,4)}`,
@@ -1003,24 +1003,26 @@ function desfazerConteudo(c, m, ct){
   if(!m.extra) c.stats.a = Math.max(0, c.stats.a - 1);
   c.revs = c.revs.filter(r=>!(r.di===ct.id && r.s==='p'));
 }
-function toggleConteudo(mId, cId){
-  const {c, m, ct} = acharConteudo(mId, cId);
-  if(!ct) return;
-  if(ct.feito){
-    desfazerConteudo(c, m, ct);
-    sincConteudos(m); sv(); rend();
-    return;
-  }
+// marca/desmarca o conteúdo como estudado hoje; devolve true se marcou
+function alternarConteudo(c, m, ct){
+  if(ct.feito){ desfazerConteudo(c, m, ct); sincConteudos(m); return false; }
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   ct.feito = fmtDMY(hoje);
   if(!m.extra) c.stats.a += 1;
   c.stats.d++;
   const n = m.conteudos.indexOf(ct) + 1;
   c.dias.push({id:ct.id, dt:hoje.toLocaleDateString('pt-BR'), ma:m.ma, i:n, f:n, q:1, titulo:ct.nome});
-  gerarRevisoes(ct.id, m.ma, n, n, 1, hoje, ct.nome, !!m.extra);
-  if(planoAgendaKey){ c.agendaConcluidos[planoAgendaKey] = true; planoAgendaKey = null; }
-  sincConteudos(m); sv(); rend();
-  ntf(m.concluido ? `🏆 ${m.ma} concluída!` : `🎉 Conteúdo estudado! Revisões agendadas.`);
+  gerarRevisoes(ct.id, m.ma, n, n, 1, addDias(hoje,7), ct.nome, !!m.extra, c); // 1ª revisão daqui a 7 dias
+  sincConteudos(m);
+  return true;
+}
+function toggleConteudo(mId, cId){
+  const {c, m, ct} = acharConteudo(mId, cId);
+  if(!ct) return;
+  const marcou = alternarConteudo(c, m, ct);
+  if(marcou && planoAgendaKey){ c.agendaConcluidos[planoAgendaKey] = true; planoAgendaKey = null; }
+  sv(); rend();
+  if(marcou) ntf(m.concluido ? `🏆 ${m.ma} concluída!` : `🎉 Conteúdo estudado! Revisões agendadas.`);
 }
 function moverConteudo(mId, cId, dir){
   const {m, ct} = acharConteudo(mId, cId);
@@ -1050,6 +1052,272 @@ function renomearMateriaConteudos(mId){
   const nome = (prompt('Nome da matéria:', m.ma)||'').trim();
   if(!nome) return;
   m.ma = nome; sv(); rend();
+}
+
+// ===== AGENDA IMPORTADA (texto com o que estudar em cada dia) =====
+// Formato:  "Seg 09/11/2026 — 11 PD"  (dia)
+//           "Matéria (2 PD):" + linhas "[ ] conteúdo"  (conteúdos do dia)
+//           "Matéria (1 PD): questões..."  ou  "Caderno de erros (3 PD)"  (atividade)
+//           "[ ] Revisões do dia..."  (revisões)   ·   "⚠ ..."  (aviso)
+const AG_DIA_RE = /^(seg|ter|qua|qui|sex|s[áa]b|dom)\S*\s+(\d{1,2})\/(\d{1,2})\/(\d{4})\s*(?:[—–-]\s*(.*))?$/i;
+function lerAgendaTexto(texto){
+  const ag = {notas:[], dias:[]};
+  let dia = null, bloco = null, depoisDeFaixa = false;
+  texto.split(/\r?\n/).forEach(bruta=>{
+    const l = bruta.trim();
+    if(!l) return;
+    if(/^={3,}$/.test(l)){ depoisDeFaixa = true; return; }
+    if(/^-{3,}.*-{3,}$/.test(l)) return; // "---- Semana de ... ----"
+    const d = AG_DIA_RE.exec(l);
+    if(d){
+      dia = {data:`${d[4]}-${d[3].padStart(2,'0')}-${d[2].padStart(2,'0')}`, pd:(d[5]||'').trim(), notas:[], blocos:[]};
+      ag.dias.push(dia); bloco = null; depoisDeFaixa = false;
+      return;
+    }
+    if(!dia || depoisDeFaixa){ ag.notas.push(l); dia = null; depoisDeFaixa = false; return; }
+    if(/^⚠/.test(l)){ dia.notas.push(l.replace(/^⚠️?\s*/, '')); return; }
+    const item = /^\[\s*[xX]?\s*\]\s*(.+)$/.exec(l);
+    if(item){
+      const txt = item[1].trim();
+      if(/^revis(õ|o)es do dia/i.test(txt)){ const n = /(\d+(?:[.,]\d+)?)\s*PD/i.exec(txt); dia.blocos.push({tipo:'rev', pd:n?n[1]:''}); bloco = null; }
+      else if(bloco) bloco.conts.push(txt);
+      else dia.blocos.push({tipo:'ativ', txt});
+      return;
+    }
+    const cab = /^(.+?)\s*\((\d+(?:[.,]\d+)?)\s*PD\)\s*(?:(:)\s*(.*))?$/i.exec(l);
+    if(cab){
+      if(cab[3] && !cab[4]){ bloco = {tipo:'ma', ma:cab[1].trim(), pd:cab[2], conts:[]}; dia.blocos.push(bloco); }
+      else { dia.blocos.push(cab[4] ? {tipo:'ativ', ma:cab[1].trim(), pd:cab[2], txt:cab[4].trim()} : {tipo:'ativ', txt:cab[1].trim(), pd:cab[2]}); bloco = null; }
+      return;
+    }
+    dia.blocos.push({tipo:'ativ', txt:l}); bloco = null;
+  });
+  return ag;
+}
+// Liga a agenda ao cronograma: os itens viram os conteúdos das matérias (na ordem da agenda)
+function aplicarAgenda(c, ag, substituir){
+  const N = cadNorm;
+  const porMat = new Map();
+  ag.dias.forEach(d=>d.blocos.forEach(b=>{
+    if(b.tipo!=='ma') return;
+    if(!porMat.has(N(b.ma))) porMat.set(N(b.ma), {nome:b.ma, conts:[]});
+    const pm = porMat.get(N(b.ma));
+    b.conts.forEach(n=>{ if(!pm.conts.some(x=>N(x)===N(n))) pm.conts.push(n); });
+  }));
+  const novoCt = nome => ({id:'ct'+Date.now().toString(36)+Math.random().toString(36).slice(2,8), nome, feito:null});
+  porMat.forEach((pm, k)=>{
+    let m = c.cron.find(x=>N(x.ma)===k);
+    if(!m){
+      m = {id:'m'+Date.now()+Math.random().toString(36).substr(2,4), ma:pm.nome, aulasTotal:0, aulasConcluidas:0, concluido:false, conteudos:[]};
+      c.cron.push(m);
+    }
+    if(!Array.isArray(m.conteudos)) return; // matéria por quantidade de aulas: fica como está
+    const antigos = m.conteudos;
+    const lista = pm.conts.map(n=>antigos.find(x=>N(x.nome)===N(n)) || novoCt(n));
+    m.conteudos = substituir
+      ? [...lista, ...antigos.filter(x=>x.feito && !lista.includes(x))] // o que já foi estudado nunca some
+      : [...antigos, ...lista.filter(x=>!antigos.includes(x))];
+    sincConteudos(m);
+  });
+  const dias = ag.dias.map(d=>({data:d.data, pd:d.pd, notas:d.notas, blocos:d.blocos.map(b=>{
+    if(b.tipo!=='ma') return b;
+    const m = c.cron.find(x=>N(x.ma)===N(b.ma));
+    const ids = m && Array.isArray(m.conteudos) ? b.conts.map(n=>(m.conteudos.find(x=>N(x.nome)===N(n))||{}).id).filter(Boolean) : [];
+    return ids.length ? {tipo:'ma', ma:b.ma, mid:m.id, pd:b.pd, cts:ids} : {tipo:'ativ', ma:b.ma, pd:b.pd, txt:b.conts.join(' · ')};
+  })}));
+  c.agendaFixa = {notas:ag.notas, dias, feitos:(c.agendaFixa && c.agendaFixa.feitos) || {}, importada:new Date().toISOString()};
+}
+function importarAgendaTexto(){
+  const N = cadNorm;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:660px;max-height:90vh;overflow-y:auto">
+        <h3 class="text-lg font-bold mb-1">📥 Importar agenda (texto)</h3>
+        <p class="text-sm text-gray-500 mb-3">Uma agenda pronta, com o que estudar em cada dia. Ela substitui a agenda mesclada deste cronograma e cada item vira um conteúdo da matéria para marcar.</p>
+        <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-xs text-indigo-900 mb-3 font-mono leading-relaxed">Seg 09/11/2026 — 11 PD<br>&nbsp;&nbsp;[ ] Revisões do dia (2 PD)<br>&nbsp;&nbsp;Língua Portuguesa (2 PD):<br>&nbsp;&nbsp;&nbsp;&nbsp;[ ] Classes de palavras: substantivo e adjetivo<br>&nbsp;&nbsp;Caderno de erros (3 PD)</div>
+        <textarea id="ag-texto" rows="9" placeholder="Cole aqui a agenda" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"></textarea>
+        <label class="text-xs text-indigo-700 font-semibold cursor-pointer hover:underline">📎 ou carregar arquivo .txt
+          <input id="ag-arquivo" type="file" accept=".txt,text/plain" class="hidden">
+        </label>
+        <div id="ag-previa" class="text-sm text-gray-600 mt-3"></div>
+        <label class="block text-sm font-semibold text-gray-700 mt-3 mb-1">Importar no cronograma</label>
+        <select id="ag-destino" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm font-bold text-indigo-700 focus:border-indigo-500 focus:outline-none">
+          ${e.cronogramas.map(cr=>`<option value="${cr.id}" ${cr.id===e.currentCronoId?'selected':''}>${escHtml(cr.nome)}${cr.agendaFixa?' (já tem agenda importada)':''}</option>`).join('')}
+        </select>
+        <label class="flex items-start gap-2 mt-3 text-sm text-gray-600 cursor-pointer select-none">
+          <input id="ag-substituir" type="checkbox" checked class="w-4 h-4 mt-0.5 accent-indigo-600">
+          <span><b>Usar os itens da agenda como a lista de conteúdos</b> das matérias (recomendado: a agenda é mais detalhada que o plano). O que você já marcou como estudado é mantido.</span>
+        </label>
+        <div class="flex gap-3 mt-5">
+          <button id="ag-cancelar" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="ag-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Importar</button>
+        </div>
+      </div>
+    </div>`;
+  const txt = document.getElementById('ag-texto'), dest = document.getElementById('ag-destino');
+  let destinoMexido = false;
+  dest.addEventListener('change', ()=>{ destinoMexido = true; });
+  const previa = () => {
+    const ag = lerAgendaTexto(txt.value);
+    const mats = new Set(), n = {c:0};
+    ag.dias.forEach(d=>d.blocos.forEach(b=>{ if(b.tipo==='ma'){ mats.add(N(b.ma)); n.c += b.conts.length; } }));
+    // escolhe sozinho o cronograma que tem mais matérias com os mesmos nomes
+    if(!destinoMexido && mats.size){
+      let melhor = null, pts = 0;
+      e.cronogramas.forEach(cr=>{ const p = cr.cron.filter(x=>mats.has(N(x.ma))).length; if(p>pts){ pts = p; melhor = cr; } });
+      if(melhor) dest.value = melhor.id;
+    }
+    document.getElementById('ag-previa').innerHTML = ag.dias.length
+      ? `<p class="font-bold text-gray-700">${ag.dias.length} dias · de ${fmtDMY(new Date(ag.dias[0].data+'T00:00:00'))} a ${fmtDMY(new Date(ag.dias[ag.dias.length-1].data+'T00:00:00'))} · ${n.c} conteúdos em ${mats.size} matérias</p>`
+      : (txt.value.trim() ? '<p class="text-red-600">Não achei nenhum dia. As linhas de dia precisam ser como "Seg 09/11/2026 — 11 PD".</p>' : '');
+  };
+  txt.addEventListener('input', previa);
+  document.getElementById('ag-arquivo').onchange = async ev => {
+    const f = ev.target.files[0];
+    if(!f) return;
+    txt.value = await f.text(); previa();
+  };
+  document.getElementById('ag-cancelar').onclick = () => { document.getElementById('modal-root').innerHTML=''; };
+  document.getElementById('ag-salvar').onclick = () => {
+    const ag = lerAgendaTexto(txt.value);
+    if(!ag.dias.length){ ntf('❌ Não achei nenhum dia na agenda','er'); return; }
+    const c = e.cronogramas.find(cr=>cr.id===dest.value);
+    if(!c) return;
+    if(c.agendaFixa && !confirm(`"${c.nome}" já tem uma agenda importada. Trocar pela nova?`)) return;
+    aplicarAgenda(c, ag, document.getElementById('ag-substituir').checked);
+    e.currentCronoId = c.id; e.aba = 'agenda'; planoMatAberta = null;
+    agendaSemanaOffset = ag.dias[0].data > hojeISO() ? offsetDaSemanaDeData(ag.dias[0].data) : 0;
+    document.getElementById('modal-root').innerHTML='';
+    sv(); rend();
+    ntf(`🗓️ Agenda importada em ${c.nome}: ${ag.dias.length} dias!`);
+  };
+}
+function agJuntos(){ try{ return localStorage.getItem('agJuntos')==='1'; }catch{ return false; } }
+function agAlternarJuntos(){ try{ localStorage.setItem('agJuntos', agJuntos()?'0':'1'); }catch{} rend(); }
+function agRemover(){
+  const c = currentC();
+  if(!confirm(`Remover a agenda importada de "${c.nome}"? As matérias, os conteúdos e o que você já marcou continuam.`)) return;
+  delete c.agendaFixa;
+  sv(); rend();
+}
+function agCrono(id){ return e.cronogramas.find(x=>x.id===id); }
+function agMarcarConteudo(crId, mId, ctId){
+  const cr = agCrono(crId), m = cr && cr.cron.find(x=>x.id===mId), ct = m && (m.conteudos||[]).find(x=>x.id===ctId);
+  if(!ct) return;
+  const marcou = alternarConteudo(cr, m, ct);
+  sv(); rend();
+  if(marcou) ntf(m.concluido ? `🏆 ${m.ma} concluída!` : '🎉 Conteúdo estudado! Revisões agendadas.');
+}
+function agMarcarAtiv(crId, key){
+  const cr = agCrono(crId);
+  if(!cr || !cr.agendaFixa) return;
+  const f = cr.agendaFixa.feitos;
+  if(f[key]) delete f[key]; else f[key] = true;
+  sv(); rend();
+}
+// itens de um dia de um plano (para contar e desenhar)
+function agItensDia(cr, d){
+  const out = [];
+  d.blocos.forEach((b,i)=>{
+    const key = d.data+'|'+i;
+    if(b.tipo==='ma'){
+      const m = cr.cron.find(x=>x.id===b.mid);
+      const cts = (b.cts||[]).map(id=>m && (m.conteudos||[]).find(x=>x.id===id)).filter(Boolean);
+      out.push({b, m, cts, feitos:cts.filter(x=>x.feito).length, total:cts.length});
+    } else {
+      const ok = !!cr.agendaFixa.feitos[key];
+      out.push({b, key, feitos:ok?1:0, total:1});
+    }
+  });
+  return out;
+}
+function agBlocoHtml(cr, d, it){
+  const b = it.b, pd = b.pd ? `<span class="text-xs text-gray-400 font-bold">${escHtml(String(b.pd))} PD</span>` : '';
+  const caixa = (marcado, acao) => `<input type="checkbox" ${marcado?'checked':''} onchange="${acao}" class="w-4 h-4 mt-0.5 accent-green-600 flex-shrink-0 cursor-pointer">`;
+  if(b.tipo==='ma') return `<div class="py-1.5">
+    <p class="text-sm font-bold text-gray-800">${escHtml(b.ma)} ${pd}</p>
+    ${it.cts.map(ct=>`<label class="flex items-start gap-2 ml-2 mt-1 cursor-pointer text-sm">
+      ${caixa(!!ct.feito, `agMarcarConteudo('${cr.id}','${it.m.id}','${ct.id}')`)}
+      <span class="${ct.feito?'line-through text-gray-400':'text-gray-700'}">${escHtml(ct.nome)}</span>
+      ${ct.feito && dmyParaISO(ct.feito)!==d.data ? `<span class="text-xs text-green-700 font-bold whitespace-nowrap">✅ ${ct.feito.slice(0,5)}</span>`:''}
+    </label>`).join('')}
+  </div>`;
+  const ok = it.feitos===1;
+  const titulo = b.tipo==='rev' ? '🔄 Revisões do dia' : (b.ma ? `<b>${escHtml(b.ma)}</b>: ${escHtml(b.txt)}` : escHtml(b.txt));
+  return `<label class="flex items-start gap-2 py-1.5 cursor-pointer text-sm">
+    ${caixa(ok, `agMarcarAtiv('${cr.id}','${it.key}')`)}
+    <span class="${ok?'line-through text-gray-400':'text-gray-700'}">${titulo} ${pd}</span>
+    ${b.tipo==='rev' && cr===currentC() ? `<button onclick="event.preventDefault();e.aba='revs';rend()" class="text-xs text-orange-600 hover:underline font-bold whitespace-nowrap">abrir revisões</button>` : ''}
+  </label>`;
+}
+function renderAgendaFixa(c){
+  const ag = c.agendaFixa, hj = hojeISO();
+  const segunda = segundaDeData(addDias(new Date(), agendaSemanaOffset*7));
+  const segISO = toISO(segunda), domISO = addDiasISO(segISO, 6);
+  const outros = e.cronogramas.filter(cr=>cr!==c && cr.agendaFixa);
+  const juntos = outros.length>0 && agJuntos();
+  const planos = juntos ? [c, ...outros] : [c];
+  const datas = [...new Set(planos.flatMap(cr=>cr.agendaFixa.dias.filter(d=>d.data>=segISO && d.data<=domISO).map(d=>d.data)))].sort();
+  const primeira = ag.dias[0] && ag.dias[0].data;
+  // conteúdos de dias que já passaram e ainda não foram estudados
+  const atrasados = [];
+  planos.forEach(cr=>cr.agendaFixa.dias.forEach(d=>{
+    if(d.data>=hj) return;
+    agItensDia(cr, d).forEach(it=>{ if(it.b.tipo==='ma') it.cts.forEach(ct=>{ if(!ct.feito && !atrasados.some(a=>a.ct===ct)) atrasados.push({cr, m:it.m, ct, data:d.data}); }); });
+  }));
+  return `
+<div class="flex items-center gap-3 mb-2 flex-wrap">
+  <h2 class="text-2xl font-bold flex-1">🗓️ Agenda — ${escHtml(c.nome)}</h2>
+  <button onclick="importarAgendaTexto()" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-2 rounded-lg text-sm font-bold">📥 Importar de novo</button>
+  <button onclick="agRemover()" class="text-sm text-red-500 hover:text-red-700 font-bold">🗑️ Remover agenda</button>
+</div>
+<p class="text-gray-500 text-sm mb-3">Marque cada conteúdo quando estudar: ele conta no progresso da matéria e as revisões dele são agendadas (7, 14, 30 e 60 dias).</p>
+${ag.notas.length?`<details class="mb-4 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-600"><summary class="cursor-pointer font-bold text-gray-700">ℹ️ Observações da agenda</summary><ul class="list-disc pl-5 mt-2 space-y-1">${ag.notas.map(n=>`<li>${escHtml(n)}</li>`).join('')}</ul></details>`:''}
+${outros.length?`<label class="flex items-center gap-2 mb-4 text-sm text-gray-700 cursor-pointer select-none">
+  <input type="checkbox" ${juntos?'checked':''} onchange="agAlternarJuntos()" class="w-4 h-4 accent-indigo-600">
+  <span>👥 Mostrar junto a agenda de <b>${outros.map(cr=>escHtml(cr.nome)).join(', ')}</b></span>
+</label>`:''}
+<div class="flex items-center gap-3 mb-4 flex-wrap">
+  <button onclick="mudarSemanaAgenda(-1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Semana anterior">←</button>
+  <div class="font-bold text-gray-700 text-sm min-w-[180px] text-center">${fmtDMY(segunda)} — ${fmtDMY(addDias(segunda,6))}</div>
+  <button onclick="mudarSemanaAgenda(1)" class="bg-gray-200 hover:bg-gray-300 text-gray-700 w-9 h-9 rounded-lg font-bold text-lg" title="Próxima semana">→</button>
+  ${agendaSemanaOffset!==0?`<button onclick="irParaSemanaAtualAgenda()" class="text-indigo-600 hover:underline text-xs font-bold">Voltar pra hoje</button>`:''}
+  ${primeira?`<button onclick="irParaSemanaDaData('${primeira}')" class="text-indigo-600 hover:underline text-xs font-bold">Ir para o início da agenda</button>`:''}
+</div>
+${atrasados.length && agendaSemanaOffset===0?`<div class="border-l-4 border-red-400 bg-red-50 rounded-xl p-4 mb-4">
+  <p class="font-bold text-red-700 mb-1">⏰ Ficou para trás (${atrasados.length})</p>
+  <p class="text-xs text-red-600 mb-2">Conteúdos de dias que já passaram e ainda não foram marcados.</p>
+  ${atrasados.map(a=>`<label class="flex items-start gap-2 py-1 cursor-pointer text-sm">
+    <input type="checkbox" onchange="agMarcarConteudo('${a.cr.id}','${a.m.id}','${a.ct.id}')" class="w-4 h-4 mt-0.5 accent-green-600 flex-shrink-0">
+    <span class="text-gray-700"><span class="text-xs text-red-600 font-bold">${fmtDMY(new Date(a.data+'T00:00:00')).slice(0,5)}</span> · ${juntos?`<span class="text-xs text-indigo-600 font-bold">${escHtml(a.cr.nome)}</span> · `:''}<b>${escHtml(a.m.ma)}</b>: ${escHtml(a.ct.nome)}</span>
+  </label>`).join('')}
+</div>`:''}
+<div class="space-y-3">
+${datas.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rounded-lg">Nada na agenda nessa semana.</p>':datas.map(data=>{
+  const isHoje = data===hj, passou = data<hj;
+  const partes = planos.map(cr=>({cr, d:cr.agendaFixa.dias.find(x=>x.data===data)})).filter(x=>x.d);
+  let feitos = 0, total = 0;
+  const corpo = partes.map(({cr,d})=>{
+    const itens = agItensDia(cr, d);
+    itens.forEach(it=>{ feitos += it.feitos; total += it.total; });
+    return `<div class="${juntos?'mt-2 pt-2 border-t border-gray-100 first:border-0 first:pt-0 first:mt-0':''}">
+      ${juntos?`<p class="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-1">📁 ${escHtml(cr.nome)}${d.pd?` · ${escHtml(d.pd)}`:''}</p>`:''}
+      ${d.notas.map(n=>`<p class="text-xs bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1 mb-1">⚠ ${escHtml(n)}</p>`).join('')}
+      <div class="divide-y divide-gray-100">${itens.map(it=>agBlocoHtml(cr, d, it)).join('')}</div>
+    </div>`;
+  }).join('');
+  const tudo = total>0 && feitos===total;
+  return `<div class="border-l-4 ${isHoje?'border-indigo-500 bg-indigo-50':tudo?'border-green-400 bg-green-50':passou?'border-gray-300 bg-gray-50':'border-gray-200 bg-white'} rounded-xl p-4">
+  <div class="flex items-center gap-2 mb-2 flex-wrap">
+    <strong class="text-sm ${isHoje?'text-indigo-700':'text-gray-700'}">${fmtAgendaLabel(data)}</strong>
+    ${isHoje?'<span class="bg-indigo-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">hoje</span>':''}
+    ${!juntos && partes[0].d.pd?`<span class="text-xs text-gray-500 font-bold">${escHtml(partes[0].d.pd)}</span>`:''}
+    <span class="ml-auto text-xs font-bold ${tudo?'text-green-700':'text-gray-400'}">${tudo?'✓ ':''}${feitos}/${total}</span>
+  </div>
+  ${corpo}
+</div>`;
+}).join('')}
+</div>`;
 }
 
 // Abre modal para registrar estudo
@@ -3836,8 +4104,11 @@ ${concluidas.map(item=>`
 </details>`:''}
 `):''}
 
-${e.aba==='agenda'?`
-<h2 class="text-2xl font-bold mb-2">🗓️ Agenda mesclada — ${c.nome}</h2>
+${e.aba==='agenda'?(c.agendaFixa?renderAgendaFixa(c):`
+<div class="flex items-center gap-3 mb-2 flex-wrap">
+  <h2 class="text-2xl font-bold flex-1">🗓️ Agenda mesclada — ${c.nome}</h2>
+  <button onclick="importarAgendaTexto()" title="Usar uma agenda pronta, com o que estudar em cada dia" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-2 rounded-lg text-sm font-bold">📥 Importar agenda (texto)</button>
+</div>
 <p class="text-gray-500 text-sm mb-6">Distribui 2 matérias por dia, intercalando entre todas as aulas ainda não concluídas deste cronograma — as que têm mais aulas restantes aparecem com mais frequência, mas bem espaçadas ao longo da agenda.</p>
 
 <div class="bg-gray-50 rounded-xl p-4 mb-8">
@@ -3895,7 +4166,7 @@ ${diasSemana.length===0?'<p class="text-gray-400 text-center py-8 bg-gray-50 rou
 </div>
 `;
 })()}
-`:''}
+`):''}
 
 ${e.aba==='rotina'?renderRotina(c):''}
 
@@ -4184,6 +4455,11 @@ ${svgChartPomodoros(14)}
   window.delConteudo = delConteudo;
   window.renomearMateriaConteudos = renomearMateriaConteudos;
   window.importarPlanoTexto = importarPlanoTexto;
+  window.importarAgendaTexto = importarAgendaTexto;
+  window.agAlternarJuntos = agAlternarJuntos;
+  window.agRemover = agRemover;
+  window.agMarcarConteudo = agMarcarConteudo;
+  window.agMarcarAtiv = agMarcarAtiv;
   window.cadMudarPlano = cadMudarPlano;
   window.cadAlternarPlano = cadAlternarPlano;
   window.cadExportar = cadExportar;
