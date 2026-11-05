@@ -2064,9 +2064,35 @@ function cadDocRef(id){ return doc(db,'cronogramas',userId,'caderno',id); }
 function cadNovoId(p){ return p+Date.now()+Math.random().toString(36).substr(2,4); }
 function cadCorCapa(m){ return m.cor || CAD_CORES_CAPA[cad().materias.indexOf(m) % CAD_CORES_CAPA.length]; }
 
+// Um caderno pertence a um plano se foi ligado a ele (m.planos) ou se tem o nome de uma matéria do plano
+function cadDoPlano(m, cr){
+  if((m.planos||[]).includes(cr.id)) return true;
+  const n = cadNorm(m.nome);
+  return cr.cron.some(x=>cadNorm(x.ma)===n);
+}
+function cadPlanoFiltro(){
+  let v = 'todos';
+  try{ v = localStorage.getItem('cadPlano') || 'todos'; }catch{}
+  return v==='todos' || e.cronogramas.some(cr=>cr.id===v) ? v : 'todos';
+}
+function cadMudarPlano(v){
+  try{ localStorage.setItem('cadPlano', v); }catch{}
+  rend();
+}
+function cadAlternarPlano(materiaId, cronoId){
+  const m = cad().materias.find(x=>x.id===materiaId);
+  if(!m) return;
+  const lista = new Set(m.planos||[]);
+  if(lista.has(cronoId)) lista.delete(cronoId); else lista.add(cronoId);
+  m.planos = [...lista];
+  sv(); rend();
+}
 function renderCaderno(c){
-  const mats = cad().materias;
-  const aberta = mats.find(m=>m.id===cadMatAberta);
+  const todas = cad().materias;
+  const planoSel = cadPlanoFiltro();
+  const crSel = e.cronogramas.find(cr=>cr.id===planoSel);
+  const mats = crSel ? todas.filter(m=>cadDoPlano(m, crSel)) : todas;
+  const aberta = todas.find(m=>m.id===cadMatAberta);
   if(!aberta) cadMatAberta = null;
   const aviso = window.documentPictureInPicture
     ? 'Cada tópico abre numa página solta que fica sempre na frente — dá para mover e redimensionar.'
@@ -2081,6 +2107,16 @@ function renderCaderno(c){
   <button onclick="cadRenomear('${aberta.id}')" class="text-sm text-gray-500 hover:text-gray-800">✏️ Renomear</button>
   <button onclick="cadExcluir('${aberta.id}')" class="text-sm text-red-500 hover:text-red-700">🗑️ Excluir caderno</button>
 </div>
+${e.cronogramas.length>1?`<div class="flex flex-wrap items-center gap-2 mb-4 text-sm">
+  <span class="text-gray-500 font-bold">📁 Aparece nos planos:</span>
+  ${e.cronogramas.map(cr=>{
+    const porNome = cr.cron.some(x=>cadNorm(x.ma)===cadNorm(aberta.nome));
+    const marcado = porNome || (aberta.planos||[]).includes(cr.id);
+    return porNome
+      ? `<span title="Tem uma matéria com este nome no plano" class="px-2 py-1 rounded-lg border-2 border-indigo-300 bg-indigo-50 text-indigo-700 font-semibold">✓ ${escHtml(cr.nome)}</span>`
+      : `<button onclick="cadAlternarPlano('${aberta.id}','${cr.id}')" class="px-2 py-1 rounded-lg border-2 font-semibold ${marcado?'border-indigo-300 bg-indigo-50 text-indigo-700':'border-gray-200 text-gray-400 hover:border-indigo-200 hover:text-indigo-600'}">${marcado?'✓':'+'} ${escHtml(cr.nome)}</button>`;
+  }).join('')}
+</div>`:''}
 <div class="flex flex-wrap items-center gap-2 mb-4">
   <button onclick="cadAddTopico('${aberta.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ Novo tópico</button>
   <button onclick="cadImportarPagina('${aberta.id}')" title="Guardar no caderno uma página pronta (ex.: resumo/artifact do Claude) exatamente como ela é" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-4 py-2 rounded-lg text-sm font-bold">📥 Importar página do Claude</button>
@@ -2126,13 +2162,19 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
 </ul>`}`;
   }
 
-  const sugestoes = c.cron.map(x=>x.ma).filter(n=>!mats.some(m=>m.nome===n));
+  const sugestoes = c.cron.map(x=>x.ma).filter(n=>!todas.some(m=>m.nome===n));
   return `
 <div class="flex items-center gap-3 mb-1 flex-wrap">
   <h2 class="text-2xl font-bold flex-1">📓 Meus cadernos</h2>
+  ${e.cronogramas.length>1?`<label class="flex items-center gap-2 text-sm font-bold text-gray-500">Mostrar:
+    <select onchange="cadMudarPlano(this.value)" class="border-2 border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-indigo-700 focus:border-indigo-500 focus:outline-none">
+      <option value="todos" ${planoSel==='todos'?'selected':''}>📚 Todos os planos (${todas.length})</option>
+      ${e.cronogramas.map(cr=>`<option value="${cr.id}" ${planoSel===cr.id?'selected':''}>📁 ${escHtml(cr.nome)} (${todas.filter(m=>cadDoPlano(m,cr)).length})</option>`).join('')}
+    </select></label>`:''}
   ${sugestoes.length?`<button onclick="cadImportarMaterias()" title="Criar um caderno para cada matéria do plano atual" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-2 rounded-lg text-sm font-bold">⤵ Criar das matérias do plano (${sugestoes.length})</button>`:''}
 </div>
 <p class="text-gray-500 text-sm mb-4">Um caderno por matéria. Clique num caderno para ver os tópicos. ${aviso}</p>
+${crSel&&!mats.length&&todas.length?`<p class="text-gray-500 text-sm mb-4 bg-gray-50 rounded-lg p-3">Nenhum caderno ligado a <b>${escHtml(crSel.nome)}</b> ainda. Os cadernos aparecem aqui quando têm o mesmo nome de uma matéria do plano, ou quando você abre um caderno e marca este plano em "Aparece nos planos".</p>`:''}
 ${mats.length?`<div class="relative mb-5 max-w-md">
   <span class="absolute left-3 top-2.5 text-gray-400">🔎</span>
   <input id="cad-filtro" type="search" value="${escHtml(cadFiltro)}" oninput="cadFiltrar(this.value)" placeholder="Pesquisar caderno ou tópico..."
@@ -3051,7 +3093,10 @@ function cadVoltar(){ cadMatAberta = null; rend(); }
 function cadAddMateria(){
   const nome = (prompt('Nome do caderno (matéria):')||'').trim();
   if(!nome) return;
-  cad().materias.push({id:cadNovoId('cm'), nome, topicos:[]});
+  const m = {id:cadNovoId('cm'), nome, topicos:[]};
+  const plano = cadPlanoFiltro();
+  if(plano!=='todos') m.planos = [plano];
+  cad().materias.push(m);
   sv(); rend();
 }
 function cadImportarMaterias(){
@@ -4139,6 +4184,8 @@ ${svgChartPomodoros(14)}
   window.delConteudo = delConteudo;
   window.renomearMateriaConteudos = renomearMateriaConteudos;
   window.importarPlanoTexto = importarPlanoTexto;
+  window.cadMudarPlano = cadMudarPlano;
+  window.cadAlternarPlano = cadAlternarPlano;
   window.cadExportar = cadExportar;
   window.cadImportarPagina = cadImportarPagina;
   window.cadBaixarPagina = cadBaixarPagina;
