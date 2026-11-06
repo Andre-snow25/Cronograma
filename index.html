@@ -1633,16 +1633,116 @@ function analisesPendentes(c){
   return (c.analises||[]).filter(a=>!a.revisada).length;
 }
 
+// Agrupa erros: matéria → tema → subtema (o assunto vem da IA como "Tema → Subtema → ...")
+function agruparErros(lista){
+  const porMateria = {};
+  lista.forEach(a=>{
+    const partes = String(a.assunto||'Sem assunto').split('→').map(x=>x.trim()).filter(Boolean);
+    const tema = partes[0] || 'Sem assunto', sub = partes[1] || '(geral)';
+    const m = porMateria[a.ma] ||= {nome:a.ma, n:0, pend:0, temas:{}};
+    const t = m.temas[tema] ||= {nome:tema, n:0, subs:{}};
+    const st = t.subs[sub] ||= {nome:sub, n:0};
+    m.n++; t.n++; st.n++;
+    if(!a.revisada) m.pend++;
+  });
+  return porMateria;
+}
+const ordenarN = obj => Object.values(obj).sort((a,b)=>b.n-a.n || a.nome.localeCompare(b.nome));
+const AN_CORES = ['#7c3aed','#db2777','#ea580c','#0891b2','#16a34a','#ca8a04','#4f46e5','#dc2626','#0d9488','#9333ea'];
+
+// Faixa resumida na lista de questões: uma barra por matéria (ou os 3 temas da matéria escolhida)
+function resumoErrosHtml(lista, sel){
+  const grupos = agruparErros(lista);
+  const itens = sel
+    ? ordenarN((grupos[sel]||{temas:{}}).temas).slice(0,3)
+    : ordenarN(grupos);
+  const total = lista.length;
+  return `<div class="bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 mb-6">
+  <div class="flex items-center gap-3 flex-wrap mb-2">
+    <p class="text-sm font-bold text-purple-900 flex-1">📌 ${sel?`Onde você mais erra em ${escHtml(sel)}`:'Onde estão seus erros'} <span class="font-normal text-purple-700">· ${total} ${total===1?'questão':'questões'}</span></p>
+    <button onclick="anVerEstat(this.dataset.ma)" data-ma="${escHtml(sel||'')}" class="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold">📊 Ver estatísticas completas</button>
+  </div>
+  ${sel ? `<div class="flex flex-wrap gap-2">${itens.map((t,i)=>`<span class="bg-white border border-purple-200 rounded-full px-3 py-1 text-xs"><b class="text-purple-700">${i+1}º</b> ${escHtml(t.nome)} <b class="text-red-600">${t.n}×</b></span>`).join('')}</div>`
+  : `<div class="flex h-3 rounded-full overflow-hidden bg-gray-200 mb-2">${itens.map((m,i)=>`<div title="${escHtml(m.nome)}: ${m.n}" style="width:${m.n/total*100}%;background:${AN_CORES[i%AN_CORES.length]}"></div>`).join('')}</div>
+    <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">${itens.slice(0,5).map((m,i)=>`<span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-sm" style="background:${AN_CORES[i%AN_CORES.length]}"></span>${escHtml(m.nome)} <b>${Math.round(m.n/total*100)}%</b></span>`).join('')}${itens.length>5?`<span class="text-gray-400">+${itens.length-5} matérias</span>`:''}</div>`}
+</div>`;
+}
+function anVerEstat(ma){ e.analiseSub = 'estatisticas'; e.anEstatMat = ma || ''; rend(); window.scrollTo({top:0}); }
+function anEstatMateria(ma){ e.anEstatMat = ma; rend(); }
+
+// Sub-aba 📊 Estatísticas: visão geral por matéria e, ao escolher uma, os temas e subtemas
+function renderEstatErros(c){
+  const todas = c.analises||[];
+  if(!todas.length) return '<p class="text-gray-400 text-center py-12 bg-gray-50 rounded-xl">Nenhuma questão analisada ainda. As estatísticas aparecem quando você analisar questões erradas.</p>';
+  const grupos = agruparErros(todas);
+  const mats = ordenarN(grupos);
+  const sel = grupos[e.anEstatMat] ? e.anEstatMat : '';
+  const nPend = todas.filter(a=>!a.revisada).length;
+  const maxM = mats[0].n;
+  const temasTodos = [];
+  mats.forEach(m=>ordenarN(m.temas).forEach(t=>temasTodos.push({...t, ma:m.nome})));
+  temasTodos.sort((a,b)=>b.n-a.n);
+  const card = (titulo, valor, sub, cor) => `<div class="bg-${cor}-50 border border-${cor}-200 rounded-xl p-3"><p class="text-xs font-bold text-${cor}-800">${titulo}</p><p class="text-2xl font-bold text-${cor}-700">${valor}</p>${sub?`<p class="text-xs text-${cor}-600">${sub}</p>`:''}</div>`;
+  const barra = (nome, n, max, cor, extra='') => `<div class="flex items-center gap-3 text-sm">
+      <span class="w-48 sm:w-64 truncate text-gray-700" title="${escHtml(nome)}">${escHtml(nome)}</span>
+      <div class="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden"><div class="h-4 rounded-full" style="width:${Math.max(4, n/max*100)}%;background:${cor}"></div></div>
+      <span class="w-10 text-right font-bold text-gray-700 tabular-nums">${n}</span>${extra}
+    </div>`;
+
+  let detalhe = '';
+  if(sel){
+    const m = grupos[sel], temas = ordenarN(m.temas), maxT = temas[0].n;
+    detalhe = `<div class="bg-white border-2 border-purple-200 rounded-xl p-4 mb-6">
+  <div class="flex items-center gap-2 flex-wrap mb-1">
+    <h3 class="font-bold text-lg text-purple-900 flex-1">🔎 ${escHtml(sel)}</h3>
+    <button onclick="anEstatMateria('')" class="text-xs text-gray-500 hover:text-gray-800 font-bold">✕ fechar</button>
+  </div>
+  <p class="text-xs text-gray-500 mb-3">${m.n} erros em ${temas.length} temas · ${m.pend} para revisar. Clique num tema para ver os subtemas.</p>
+  <div class="space-y-1">${temas.map(t=>{
+    const subs = ordenarN(t.subs).filter(x=>x.nome!=='(geral)' || Object.keys(t.subs).length>1);
+    return `<details class="group">
+      <summary class="list-none cursor-pointer rounded-lg hover:bg-purple-50 px-1 py-0.5">${barra(t.nome, t.n, maxT, '#a855f7', `<span class="text-gray-400 text-xs w-3">${subs.length?'▾':''}</span>`)}</summary>
+      ${subs.length?`<ul class="ml-6 mt-1 mb-2 space-y-0.5 border-l-2 border-purple-100 pl-3">${subs.map(x=>`<li class="flex justify-between gap-2 text-xs text-gray-600"><span>${escHtml(x.nome)}</span><b class="text-red-500">${x.n}×</b></li>`).join('')}</ul>`:''}
+    </details>`;
+  }).join('')}</div>
+  <button onclick="setAnaliseMateria(this.dataset.ma);setAnaliseSub('questoes')" data-ma="${escHtml(sel)}" class="mt-4 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-bold">❓ Ver as questões de ${escHtml(sel)}</button>
+</div>`;
+  }
+
+  return `
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+  ${card('❌ Questões erradas', todas.length, '', 'red')}
+  ${card('⏳ Para revisar', nPend, `${todas.length-nPend} já revisadas`, 'amber')}
+  ${card('📚 Matérias', mats.length, 'com algum erro', 'purple')}
+  ${card('🎯 Mais erra', `<span class="block text-base leading-tight py-1 truncate" title="${escHtml(mats[0].nome)}">${escHtml(mats[0].nome)}</span>`, `${Math.round(mats[0].n/todas.length*100)}% dos erros`, 'pink')}
+</div>
+${detalhe}
+<div class="bg-gray-50 rounded-xl p-4 mb-6">
+  <h3 class="font-bold text-gray-700 mb-1">📚 Erros por matéria</h3>
+  <p class="text-xs text-gray-500 mb-3">Clique numa matéria para ver os temas dela.</p>
+  <div class="space-y-1">${mats.map((m,i)=>`<button onclick="anEstatMateria(this.dataset.ma)" data-ma="${escHtml(m.nome)}" class="block w-full text-left rounded-lg px-1 py-0.5 ${m.nome===sel?'bg-purple-100':'hover:bg-white'}">${barra(m.nome, m.n, maxM, AN_CORES[i%AN_CORES.length])}</button>`).join('')}</div>
+</div>
+<div class="bg-gray-50 rounded-xl p-4">
+  <h3 class="font-bold text-gray-700 mb-3">🏆 Temas que mais aparecem (todas as matérias)</h3>
+  <ol class="space-y-1 text-sm">${temasTodos.slice(0,10).map((t,i)=>`<li class="flex items-center gap-2">
+    <span class="w-6 text-right font-bold text-purple-600">${i+1}º</span>
+    <span class="flex-1 min-w-0 truncate"><b class="text-gray-800">${escHtml(t.nome)}</b> <span class="text-xs text-gray-400">· ${escHtml(t.ma)}</span></span>
+    <b class="text-red-600">${t.n}×</b>
+  </li>`).join('')}</ol>
+</div>`;
+}
+
 function renderAnalises(c){
-  const sub = e.analiseSub==='materiais' ? 'materiais' : 'questoes';
+  const sub = ['materiais','estatisticas'].includes(e.analiseSub) ? e.analiseSub : 'questoes';
   const btnSub = (val,rotulo) => `<button onclick="setAnaliseSub('${val}')" class="px-4 py-2 font-bold text-sm border-b-2 ${sub===val?'border-purple-600 text-purple-700':'border-transparent text-gray-500 hover:text-gray-700'}">${rotulo}</button>`;
   return `
 <h2 class="text-2xl font-bold mb-3">🧠 Análise de Questões — ${c.nome}</h2>
 <div class="flex gap-2 border-b mb-6">
   ${btnSub('questoes',`❓ Questões erradas (${(c.analises||[]).length})`)}
+  ${btnSub('estatisticas','📊 Estatísticas')}
   ${btnSub('materiais',`📄 Materiais de revisão (${(c.materiais||[]).length})`)}
 </div>
-${sub==='materiais' ? renderMateriais(c) : renderQuestoesAnalisadas(c)}`;
+${sub==='materiais' ? renderMateriais(c) : sub==='estatisticas' ? renderEstatErros(c) : renderQuestoesAnalisadas(c)}`;
 }
 
 function renderQuestoesAnalisadas(c){
@@ -1678,12 +1778,7 @@ function renderQuestoesAnalisadas(c){
   ${sel?`<button onclick="analisarErro(this.dataset.ma)" data-ma="${escHtml(sel)}" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold">🤖 Analisar nova questão</button>`:''}
 </div>
 
-${daMateria.length?`
-<div class="bg-purple-50 border-2 border-purple-200 rounded-xl p-4 mb-6">
-  <p class="text-sm font-bold text-purple-900 mb-1">📌 Temas que você mais erra${sel?'':' — por matéria'} (${daMateria.length} questões)</p>
-  <p class="text-xs text-gray-500 mb-3">Clique num tema para ver os subtemas.</p>
-  ${rankingTemasHtml(daMateria, !sel)}
-</div>`:''}
+${daMateria.length?resumoErrosHtml(daMateria, sel):''}
 
 <div class="flex flex-wrap gap-2 mb-4">
   ${btnFiltro('pendentes','⏳ Para revisar',nPend)}
@@ -4499,6 +4594,8 @@ ${e.cronogramas.length>1&&pdEscopo()==='todos'?pdResumoPorPlano():''}
   window.agAlternarJuntos = agAlternarJuntos;
   window.agRemover = agRemover;
   window.setPdEscopo = setPdEscopo;
+  window.anVerEstat = anVerEstat;
+  window.anEstatMateria = anEstatMateria;
   window.agMarcarConteudo = agMarcarConteudo;
   window.agMarcarAtiv = agMarcarAtiv;
   window.cadMudarPlano = cadMudarPlano;
