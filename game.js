@@ -137,18 +137,45 @@ function separarArtigos(texto){
     const texto = t.slice(mk.ini, fim).replace(/\n{2,}/g, '\n').replace(/ ?\n ?/g, '\n').trim();
     const numFmt = mk.num.toLocaleString('pt-BR');
     const rot = `Art. ${numFmt}${mk.num < 10 ? 'º' : ''}${mk.letra ? '-' + mk.letra : ''}`;
-    return {rot, texto};
+    return {rot, texto, num: mk.num};
   }).filter(a => !(a.texto.length < 140 && /revogad|vetad/i.test(a.texto)));
+}
+// "Arts. 1º a 16: ...  Art. 37  Art. 41" → {1..16, 37, 41}. Aceita "a", "até" e hífen.
+function lerSelecao(texto){
+  const nums = new Set();
+  const re = /(\d{1,4}(?:\.\d{3})*)\s*[º°o]?\s*(?:(?:a|até|ao|-|–)\s*(?:art\.?\s*)?(\d{1,4}(?:\.\d{3})*))?/gi;
+  let m;
+  while((m = re.exec(texto))){
+    const de = parseInt(m[1].replace(/\./g, ''), 10), ate = m[2] ? parseInt(m[2].replace(/\./g, ''), 10) : de;
+    if(ate >= de && ate - de <= 2000) for(let n = de; n <= ate; n++) nums.add(n);
+  }
+  return nums;
+}
+// Artigo longo demais (ex.: art. 5º da CF) vira várias partes, quebrando entre incisos/linhas
+function dividirArtigo(a){
+  if(a.texto.length <= CHARS_POR_FASE) return [a];
+  const partes = [];
+  let atual = '';
+  a.texto.split('\n').forEach(linha => {
+    while(linha.length > CHARS_POR_FASE){ // linha gigante sem quebra: corta no tamanho
+      if(atual){ partes.push(atual); atual = ''; }
+      partes.push(linha.slice(0, CHARS_POR_FASE)); linha = linha.slice(CHARS_POR_FASE);
+    }
+    if(atual && atual.length + linha.length + 1 > CHARS_POR_FASE){ partes.push(atual); atual = ''; }
+    atual += (atual ? '\n' : '') + linha;
+  });
+  if(atual) partes.push(atual);
+  return partes.map((texto, i) => ({rot: `${a.rot} (parte ${i + 1}/${partes.length})`, texto}));
 }
 function montarFases(artigos, porFase){
   const fases = [];
   let atual = [], chars = 0;
-  artigos.forEach(a => {
+  artigos.flatMap(dividirArtigo).forEach(a => {
     if(atual.length && (atual.length >= porFase || chars + a.texto.length > CHARS_POR_FASE)){
       fases.push(atual); atual = []; chars = 0;
     }
-    atual.push({rot: a.rot, texto: a.texto.slice(0, 6000)});
-    chars += Math.min(a.texto.length, 6000);
+    atual.push({rot: a.rot, texto: a.texto});
+    chars += a.texto.length;
   });
   if(atual.length) fases.push(atual);
   return fases;
@@ -167,6 +194,9 @@ function gmImportar(){
       <input id="gm-arquivo" type="file" accept=".pdf,.txt,application/pdf,text/plain" class="hidden">
     </label>
     <textarea id="gm-texto" rows="6" placeholder="...ou cole aqui o texto da lei (Art. 1º ... Art. 2º ...)" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"></textarea>
+    <label class="block text-sm font-semibold text-gray-700 mt-3 mb-1">Só alguns artigos? <span class="font-normal text-gray-500">(opcional)</span></label>
+    <textarea id="gm-sel" rows="3" placeholder="Ex:&#10;Arts. 1º a 16: princípios e direitos&#10;Art. 37: administração pública&#10;Art. 144: segurança pública" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs focus:border-indigo-500 focus:outline-none"></textarea>
+    <p class="text-xs text-gray-400">Deixe vazio para usar a lei inteira. Os números de artigo da lista são procurados no texto acima.</p>
     <div class="flex items-center gap-2 mt-2 text-sm">
       <label class="font-semibold text-gray-700">Artigos por fase:</label>
       <select id="gm-por" class="border-2 border-gray-300 rounded-lg px-2 py-1"><option>3</option><option selected>5</option><option>8</option></select>
@@ -180,13 +210,21 @@ function gmImportar(){
   let artigos = [];
   const previa = () => {
     artigos = separarArtigos($('gm-texto').value);
+    const sel = lerSelecao($('gm-sel').value);
+    let faltam = [];
+    if(sel.size){
+      const achados = new Set(artigos.map(a => a.num));
+      faltam = [...sel].filter(n => !achados.has(n));
+      artigos = artigos.filter(a => sel.has(a.num));
+    }
     const fases = montarFases(artigos, +$('gm-por').value);
     $('gm-previa').innerHTML = artigos.length
-      ? `<p class="font-bold text-gray-700">✅ ${artigos.length} artigos · ${fases.length} fases <span class="font-normal text-gray-500">(${esc(artigos[0].rot)} até ${esc(artigos[artigos.length - 1].rot)})</span></p>`
+      ? `<p class="font-bold text-gray-700">✅ ${artigos.length} artigos · ${fases.length} fases <span class="font-normal text-gray-500">(${esc(artigos[0].rot)} até ${esc(artigos[artigos.length - 1].rot)})</span></p>${faltam.length && $('gm-texto').value.trim() ? `<p class="text-xs text-amber-600 mt-1">⚠ Não achei no texto: art. ${faltam.slice(0, 15).join(', ')}${faltam.length > 15 ? '…' : ''}</p>` : ''}`
       : ($('gm-texto').value.trim() ? '<p class="text-red-600">Não achei artigos. O texto precisa ter linhas começando com "Art. 1º", "Art. 2º"...</p>' : '');
   };
   $('gm-texto').addEventListener('input', previa);
   $('gm-por').addEventListener('change', previa);
+  $('gm-sel').addEventListener('input', previa);
   $('gm-arquivo').onchange = async ev => {
     const f = ev.target.files[0];
     if(!f) return;
