@@ -50,6 +50,7 @@ textarea{resize:vertical;min-height:60px}
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail, signOut, GoogleAuthProvider, signInWithPopup } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+import { iniciarGame, renderGame } from './game.js';
 
 const firebaseConfig = {
   apiKey: "AIzaSyD2d9bFtE-29MegN1xG9NOf776Rx8Lfgrs",
@@ -64,6 +65,13 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 const auth = getAuth(app);
+
+// CronogramaGame (game.js) recebe do app o que precisa: estado, salvar, redesenhar e Firebase
+iniciarGame({
+  estado: () => e, sv: () => sv(), rend: () => rend(), ntf: (m,t) => ntf(m,t), escHtml: s => escHtml(s),
+  db, auth, doc, getDoc, setDoc, deleteDoc, uid: () => userId,
+  modal: (html, largura=520) => { document.getElementById('modal-root').innerHTML = `<div class="modal-overlay" id="modal-overlay"><div class="modal-box fade" style="max-width:${largura}px;max-height:90vh;overflow-y:auto">${html}</div></div>`; },
+});
 
 // O documento de cada usuário no Firestore é identificado pelo uid do login (email/senha).
 let userId = null;
@@ -4127,6 +4135,7 @@ function rend(){
 <button onclick="e.aba='analises';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap relative ${e.aba==='analises'?'tab-active':'text-gray-600 hover:text-gray-800'}">🧠 Análises${analisesPendentes(c)>0?`<span class="absolute top-2 right-2 bg-purple-600 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center">${analisesPendentes(c)}</span>`:''}</button>
 <button onclick="e.aba='caderno';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='caderno'?'tab-active':'text-gray-600 hover:text-gray-800'}">📓 Caderno</button>
 <button onclick="e.aba='foco';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='foco'?'tab-active':'text-gray-600 hover:text-gray-800'}">🍅 Foco (PD)</button>
+<button onclick="e.aba='game';rend()" class="flex-1 px-6 py-4 font-bold whitespace-nowrap ${e.aba==='game'?'tab-active':'text-gray-600 hover:text-gray-800'}">🎮 Game</button>
 </div>
 </div>
 
@@ -4464,6 +4473,8 @@ ${c.questoes.slice().sort((a,b)=>b.id-a.id).map(q=>`
 ${e.aba==='analises'?renderAnalises(c):''}
 
 ${e.aba==='caderno'?renderCaderno(c):''}
+
+${e.aba==='game'?renderGame():''}
 
 ${e.aba==='foco'?`
 <h2 class="text-2xl font-bold mb-2">🍅 Foco — ${c.nome}</h2>
