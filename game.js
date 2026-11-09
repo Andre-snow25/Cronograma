@@ -407,16 +407,57 @@ function gmFase(id, i){
     ${f.gerada ? `<button onclick="gmIniciarFase('${id}',${i},true)" class="w-full text-sm text-indigo-600 hover:underline font-semibold py-1">🔄 Criar exercícios novos para esta fase</button>` : ''}
     <button onclick="document.getElementById('modal-root').innerHTML=''" class="w-full text-sm text-gray-400 hover:text-gray-600 py-1">Fechar</button>`);
 }
+// ---------- leitura formatada do artigo ----------
+// O texto vem quebrado em linhas do PDF/página; junta as linhas de cada parte da lei
+// (caput, inciso, alínea, parágrafo) e mostra cada uma com seu destaque.
+const RE_PARTE = [
+  ['art', /^(Art\.?\s*[\d.]+\s*[º°o]?(?:\s*-\s*[A-Z]{1,2})?\.?)\s*(.*)$/],
+  ['par', /^(§\s*\d+\s*[º°o]?\.?|Par[áa]grafo [úu]nico\.?)\s*(.*)$/i],
+  ['inc', /^([IVXLCDM]+)\s*[-–—]\s*(.*)$/],
+  ['ali', /^([a-z])\)\s*(.*)$/],
+  ['item', /^(\d{1,2})\.\s+(.*)$/],
+];
+// Palavras que a banca troca e prazos/números: destacados para chamar a atenção na leitura
+const RE_ALERTA = /(?<![A-Za-zÀ-ú])(salvo|exceto|vedad[oa]s?|proibid[oa]s?|somente|apenas|exclusivamente|privativamente|privativ[oa]s?|independentemente|n[ãa]o|nenhum|nenhuma|ningu[ée]m|vedado|poder[áã]o?|dever[áã]o?|facultad[oa]|obrigat[óo]ri[oa]|mediante|desde que|inclusive|sen[ãa]o)(?![A-Za-zÀ-ú])/gi;
+const RE_PRAZO = /(?<![A-Za-zÀ-ú\d])(\d+[\d.,]*\s*(?:\([^)]{2,30}\)\s*)?(?:dias?|meses|m[êe]s|anos?|horas?|%|por cento)|(?:um|dois|tr[êe]s|quatro|cinco|seis|sete|oito|nove|dez|quinze|trinta|sessenta|noventa|cento e vinte)\s+(?:dias|meses|anos|horas))(?![A-Za-zÀ-ú])/gi;
+function destacar(txt){
+  return esc(txt)
+    .replace(RE_PRAZO, '<b class="text-sky-700 bg-sky-50 rounded px-0.5">$1</b>')
+    .replace(RE_ALERTA, '<b class="text-rose-700">$1</b>');
+}
+function formatarArtigo(texto){
+  const blocos = [];
+  texto.split('\n').map(l => l.trim()).filter(Boolean).forEach(linha => {
+    for(const [tipo, re] of RE_PARTE){
+      const m = re.exec(linha);
+      if(m){ blocos.push({tipo, rot: m[1], txt: m[2]}); return; }
+    }
+    if(blocos.length) blocos[blocos.length - 1].txt += ' ' + linha; // continuação da linha anterior
+    else blocos.push({tipo: 'txt', rot: '', txt: linha});
+  });
+  return blocos.map(b => {
+    const t = destacar(b.txt);
+    switch(b.tipo){
+      case 'art':  return `<p class="mb-2"><span class="inline-block bg-indigo-600 text-white text-xs font-bold rounded-md px-2 py-0.5 mr-1 align-middle">${esc(b.rot.replace(/\.$/, ''))}</span>${t}</p>`;
+      case 'par':  return `<div class="my-2 bg-amber-50 border-l-4 border-amber-300 rounded-r-lg px-3 py-2"><b class="text-amber-800">${esc(b.rot.replace(/\.$/, ''))}</b> ${t}</div>`;
+      case 'inc':  return `<div class="flex gap-2 py-1 pl-2 border-l-2 border-indigo-100 ml-1"><span class="w-10 flex-shrink-0 text-right font-bold text-indigo-600">${esc(b.rot)}</span><span class="flex-1">${t}</span></div>`;
+      case 'ali':  return `<div class="flex gap-2 py-0.5 pl-14"><span class="flex-shrink-0 font-bold text-gray-500">${esc(b.rot)})</span><span class="flex-1">${t}</span></div>`;
+      case 'item': return `<div class="flex gap-2 py-0.5 pl-20"><span class="flex-shrink-0 font-bold text-gray-400">${esc(b.rot)}.</span><span class="flex-1">${t}</span></div>`;
+      default:     return `<p class="mb-2">${t}</p>`;
+    }
+  }).join('');
+}
 async function gmLerFase(id, i){
   try{
     const d = await lerDoc(docFase(id, i));
     ctx.modal(`
-      <h3 class="text-lg font-bold mb-3">📖 ${esc(lei(id).fases[i].rot)}</h3>
-      <div class="space-y-3 text-sm text-gray-800 max-h-[60vh] overflow-y-auto pr-1">${(d?.artigos || []).map(a => `<p class="whitespace-pre-line leading-relaxed">${esc(a.texto)}</p>`).join('')}</div>
+      <h3 class="text-lg font-bold mb-1">📖 ${esc(lei(id).fases[i].rot)}</h3>
+      <p class="text-xs text-gray-500 mb-3"><b class="text-rose-700">Vermelho</b>: palavras que a banca costuma trocar · <b class="text-sky-700 bg-sky-50 rounded px-0.5">Azul</b>: prazos e números</p>
+      <div class="text-[15px] text-gray-800 leading-relaxed max-h-[62vh] overflow-y-auto pr-2 space-y-4">${(d?.artigos || []).map(a => `<div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">${formatarArtigo(a.texto)}</div>`).join('')}</div>
       <div class="flex gap-3 mt-4">
         <button onclick="gmFase('${id}',${i})" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold">Voltar</button>
         <button onclick="gmIniciarFase('${id}',${i})" class="flex-1 bg-green-500 hover:bg-green-600 text-white rounded-lg py-2.5 font-bold">▶ Começar</button>
-      </div>`, 680);
+      </div>`, 760);
   }catch(err){ erroNuvem(err); }
 }
 async function gmIniciarFase(id, i, novos = false){
