@@ -1,5 +1,7 @@
 {
+  "regions": ["gru1"],
   "functions": {
-    "api/gerar-exercicios.js": { "maxDuration": 60 }
+    "api/gerar-exercicios.js": { "maxDuration": 60 },
+    "api/buscar-lei.js": { "maxDuration": 30 }
   }
 }

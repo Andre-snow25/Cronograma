@@ -37,7 +37,7 @@ let licao = null;       // lição em andamento
 export function iniciarGame(contexto){
   ctx = contexto;
   Object.assign(window, {
-    gmImportar, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
+    gmImportar, gmAtualizarLei, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
     gmAvatar, gmEscolherAvatar, gmEscolher, gmOrdenar, gmDesordenar, gmVerificar, gmContinuar, gmSair, gmFimLicao,
   });
 }
@@ -119,22 +119,78 @@ async function textoDoPdf(arquivo, aoAvancar){
   }
   return out;
 }
+// Página salva do Planalto: costuma estar em windows-1252, não em UTF-8
+function decodificarArquivo(buf){
+  const inicio = new TextDecoder('latin1').decode(buf.slice(0, 4096));
+  const cs = (/<meta[^>]+charset=["']?([\w-]+)/i.exec(inicio)?.[1] || '').toLowerCase();
+  if(cs && cs !== 'utf-8' && cs !== 'utf8'){
+    try{ return new TextDecoder(cs === 'iso-8859-1' ? 'windows-1252' : cs).decode(buf); }catch{}
+  }
+  try{ return new TextDecoder('utf-8', {fatal: true}).decode(buf); }
+  catch{ return new TextDecoder('windows-1252').decode(buf); }
+}
+// No Planalto a redação antiga (revogada/alterada) aparece riscada: <strike>, <s> ou <del>.
+// Tira isso e as notas "(Redação dada pela...)", "(Incluído pela...)", "(Vide...)".
+function htmlParaTexto(html){
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('strike, s, del, script, style, noscript, head').forEach(el => el.remove());
+  doc.querySelectorAll('[style*="line-through"]').forEach(el => el.remove());
+  doc.querySelectorAll('p, br, div, li, tr, h1, h2, h3, h4, h5, h6, blockquote, center').forEach(el => el.after(doc.createTextNode('\n')));
+  return (doc.body?.textContent || '')
+    .replace(/ /g, ' ')
+    .replace(/\((?:Reda[çc][ãa]o dada|Inclu[íi]d[oa]|Acrescid[oa]|Vide|Regulamento|Renumerad[oa]|Produção de efeito|Vigência)[^)]*\)/gi, '')
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+}
+function hashTexto(t){
+  let h = 5381;
+  for(let i = 0; i < t.length; i++) h = (h * 33 + t.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+const hashFase = arts => hashTexto(arts.map(a => a.texto).join('\n'));
+async function buscarPlanalto(url){
+  const token = await ctx.auth.currentUser.getIdToken();
+  const r = await fetch('/api/buscar-lei', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token},
+    body: JSON.stringify({url}),
+  });
+  const d = await r.json().catch(() => ({erro: 'Resposta inválida do servidor.'}));
+  if(!r.ok) throw new Error(d.erro || 'Erro ' + r.status);
+  return d;
+}
+// Texto da lei → artigos já filtrados pela seleção ("Arts. 1º a 16, 37...")
+function artigosDe(texto, selecao){
+  let artigos = separarArtigos(texto);
+  const sel = lerSelecao(selecao || '');
+  let faltam = [];
+  if(sel.size){
+    const achados = new Set(artigos.map(a => a.num));
+    faltam = [...sel].filter(n => !achados.has(n));
+    artigos = artigos.filter(a => sel.has(a.num));
+  }
+  return {artigos, faltam};
+}
+
 // "Art. 1º", "Art. 10.", "Art. 1.091-A", "Art. 5o" no começo da linha. As leis vêm em ordem
 // crescente, então um "Art." com número menor que o anterior é citação, não artigo novo.
 function separarArtigos(texto){
   const t = texto.replace(/\r/g, '').replace(/[ \t ]+/g, ' ');
   const re = /(?:^|\n) ?(?:Art\.|Artigo) ?(\d{1,3}(?:\.\d{3})*) ?([º°o])?\.? ?(?: ?- ?([A-Z]{1,2})\b)?/g;
   const marcas = [];
-  let m, ultimo = -1;
+  let m, ultimo = -1, corte = t.length;
   while((m = re.exec(t))){
     const num = parseInt(m[1].replace(/\./g, ''), 10);
+    if(num === 1 && ultimo > 1 && !m[3]){ corte = m.index; break; } // recomeçou do art. 1º (ex.: ADCT da CF): fim da lei
     if(num < ultimo) continue;
     ultimo = num;
     marcas.push({ini: m.index + (t[m.index] === '\n' ? 1 : 0), num, letra: m[3] || ''});
   }
   return marcas.map((mk, i) => {
-    const fim = i + 1 < marcas.length ? marcas[i + 1].ini : t.length;
-    const texto = t.slice(mk.ini, fim).replace(/\n{2,}/g, '\n').replace(/ ?\n ?/g, '\n').trim();
+    const fim = i + 1 < marcas.length ? marcas[i + 1].ini : corte;
+    const linhas = t.slice(mk.ini, fim).replace(/\n{2,}/g, '\n').replace(/ ?\n ?/g, '\n').trim().split('\n');
+    // títulos que vêm depois do artigo ("CAPÍTULO II", "DOS DIREITOS SOCIAIS") não são parte dele
+    while(linhas.length > 1 && !/[a-zà-ú]/.test(linhas[linhas.length - 1])) linhas.pop();
+    const texto = linhas.join('\n');
     const numFmt = mk.num.toLocaleString('pt-BR');
     const rot = `Art. ${numFmt}${mk.num < 10 ? 'º' : ''}${mk.letra ? '-' + mk.letra : ''}`;
     return {rot, texto, num: mk.num};
@@ -187,11 +243,17 @@ function rotuloFase(arts){
 function gmImportar(){
   ctx.modal(`
     <h3 class="text-lg font-bold mb-1">📥 Nova lei</h3>
-    <p class="text-sm text-gray-500 mb-3">Envie o PDF da lei (ex.: do site do Planalto) ou cole o texto. O app separa os artigos em fases; os exercícios de cada fase são criados pela IA quando você abrir a fase.</p>
+    <p class="text-sm text-gray-500 mb-3">Busque a lei no site do Planalto, envie o arquivo (PDF ou página salva) ou cole o texto. O app separa os artigos em fases; os exercícios de cada fase são criados pela IA quando você abrir a fase.</p>
     <label class="block text-sm font-semibold text-gray-700 mb-1">Nome da lei</label>
     <input id="gm-nome" placeholder="Ex: LC 207/79 – Lei Orgânica da PC/SP" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
-    <label class="inline-block bg-indigo-50 border-2 border-indigo-200 text-indigo-700 rounded-lg px-3 py-2 text-sm font-bold cursor-pointer hover:bg-indigo-100 mb-2">📄 Escolher PDF ou .txt
-      <input id="gm-arquivo" type="file" accept=".pdf,.txt,application/pdf,text/plain" class="hidden">
+    <label class="block text-sm font-semibold text-gray-700 mb-1">🔗 Endereço da lei no Planalto <span class="font-normal text-gray-500">(fica sempre atualizada)</span></label>
+    <div class="flex gap-2 mb-1">
+      <input id="gm-url" placeholder="https://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm" class="flex-1 min-w-0 border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none">
+      <button id="gm-buscar" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 rounded-lg text-sm font-bold whitespace-nowrap">Buscar</button>
+    </div>
+    <p class="text-xs text-gray-400 mb-3">O texto riscado (revogado) é retirado sozinho.</p>
+    <label class="inline-block bg-indigo-50 border-2 border-indigo-200 text-indigo-700 rounded-lg px-3 py-2 text-sm font-bold cursor-pointer hover:bg-indigo-100 mb-2">📄 ou escolher arquivo (PDF, página .htm salva ou .txt)
+      <input id="gm-arquivo" type="file" accept=".pdf,.htm,.html,.txt,application/pdf,text/html,text/plain" class="hidden">
     </label>
     <textarea id="gm-texto" rows="6" placeholder="...ou cole aqui o texto da lei (Art. 1º ... Art. 2º ...)" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none"></textarea>
     <label class="block text-sm font-semibold text-gray-700 mt-3 mb-1">Só alguns artigos? <span class="font-normal text-gray-500">(opcional)</span></label>
@@ -207,29 +269,47 @@ function gmImportar(){
       <button id="gm-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Criar fases</button>
     </div>`, 620);
   const $ = id => document.getElementById(id);
-  let artigos = [];
+  let artigos = [], fonte = null;
   const previa = () => {
-    artigos = separarArtigos($('gm-texto').value);
-    const sel = lerSelecao($('gm-sel').value);
-    let faltam = [];
-    if(sel.size){
-      const achados = new Set(artigos.map(a => a.num));
-      faltam = [...sel].filter(n => !achados.has(n));
-      artigos = artigos.filter(a => sel.has(a.num));
-    }
+    let faltam;
+    ({artigos, faltam} = artigosDe($('gm-texto').value, $('gm-sel').value));
     const fases = montarFases(artigos, +$('gm-por').value);
     $('gm-previa').innerHTML = artigos.length
       ? `<p class="font-bold text-gray-700">✅ ${artigos.length} artigos · ${fases.length} fases <span class="font-normal text-gray-500">(${esc(artigos[0].rot)} até ${esc(artigos[artigos.length - 1].rot)})</span></p>${faltam.length && $('gm-texto').value.trim() ? `<p class="text-xs text-amber-600 mt-1">⚠ Não achei no texto: art. ${faltam.slice(0, 15).join(', ')}${faltam.length > 15 ? '…' : ''}</p>` : ''}`
       : ($('gm-texto').value.trim() ? '<p class="text-red-600">Não achei artigos. O texto precisa ter linhas começando com "Art. 1º", "Art. 2º"...</p>' : '');
   };
-  $('gm-texto').addEventListener('input', previa);
+  $('gm-texto').addEventListener('input', () => { fonte = null; previa(); });
+  $('gm-buscar').onclick = async () => {
+    const url = $('gm-url').value.trim();
+    if(!url){ ctx.ntf('❌ Cole o endereço da lei no Planalto', 'er'); return; }
+    $('gm-buscar').disabled = true; $('gm-buscar').textContent = '...';
+    $('gm-previa').innerHTML = '<p class="text-indigo-600">🔗 Buscando no Planalto...</p>';
+    try{
+      const d = await buscarPlanalto(url);
+      $('gm-texto').value = htmlParaTexto(d.html);
+      fonte = d.url || url;
+      const tit = /<title[^>]*>([^<]*)</i.exec(d.html)?.[1]?.trim();
+      if(tit && !$('gm-nome').value.trim()) $('gm-nome').value = tit;
+      previa();
+    }catch(err){
+      $('gm-previa').innerHTML = `<p class="text-red-600">${esc(err.message || err)}</p>`;
+    }
+    $('gm-buscar').disabled = false; $('gm-buscar').textContent = 'Buscar';
+  };
   $('gm-por').addEventListener('change', previa);
   $('gm-sel').addEventListener('input', previa);
   $('gm-arquivo').onchange = async ev => {
     const f = ev.target.files[0];
     if(!f) return;
     if(!$('gm-nome').value.trim()) $('gm-nome').value = f.name.replace(/\.[^.]+$/, '');
+    fonte = null;
     if(/\.txt$/i.test(f.name) || f.type === 'text/plain'){ $('gm-texto').value = await f.text(); previa(); return; }
+    if(/\.html?$/i.test(f.name) || f.type === 'text/html'){
+      $('gm-texto').value = htmlParaTexto(decodificarArquivo(new Uint8Array(await f.arrayBuffer())));
+      previa();
+      if(!artigos.length) $('gm-previa').innerHTML = '<p class="text-red-600">Não achei artigos nessa página.</p>';
+      return;
+    }
     $('gm-previa').innerHTML = '<p class="text-indigo-600">📄 Lendo o PDF...</p>';
     try{
       $('gm-texto').value = await textoDoPdf(f, (i, n) => { $('gm-previa').innerHTML = `<p class="text-indigo-600">📄 Lendo o PDF... página ${i} de ${n}</p>`; });
@@ -256,12 +336,49 @@ function gmImportar(){
       erroNuvem(err);
       return;
     }
-    g().leis.push({id, nome, criada: new Date().toISOString(), nArt: artigos.length, fases: fases.map(arts => ({rot: rotuloFase(arts), est: 0}))});
+    g().leis.push({id, nome, criada: new Date().toISOString(), nArt: artigos.length,
+      fonte, selecao: $('gm-sel').value.trim(), porFase: +$('gm-por').value,
+      fases: fases.map(arts => ({rot: rotuloFase(arts), est: 0, h: hashFase(arts)}))});
     leiAberta = id;
     document.getElementById('modal-root').innerHTML = '';
     ctx.sv(); ctx.rend();
     ctx.ntf(`🎮 ${fases.length} fases criadas!`);
   };
+}
+
+// Baixa de novo a lei e troca só as fases cujo texto mudou (as outras mantêm exercícios e estrelas)
+async function gmAtualizarLei(id){
+  const L = lei(id);
+  if(!L?.fonte) return;
+  ctx.ntf('🔗 Buscando a versão atual no Planalto...');
+  let novas;
+  try{
+    const d = await buscarPlanalto(L.fonte);
+    const {artigos} = artigosDe(htmlParaTexto(d.html), L.selecao);
+    if(!artigos.length) throw new Error('Não achei artigos na página do Planalto.');
+    novas = montarFases(artigos, L.porFase || 5);
+    L.nArt = artigos.length;
+  }catch(err){ ctx.ntf('❌ ' + (err.message || err), 'er'); return; }
+  let mudou = 0;
+  try{
+    for(let i = 0; i < novas.length; i++){
+      const h = hashFase(novas[i]), velha = L.fases[i];
+      let igual = velha?.h === h;
+      if(velha && !velha.h){ // lei criada antes do controle de versão: compara com o texto guardado
+        const doc = await lerDoc(docFase(id, i));
+        igual = !!doc && hashFase(doc.artigos || []) === h;
+      }
+      if(igual){ velha.h = h; continue; }
+      await gravarDoc(docFase(id, i), {artigos: novas[i], exercicios: null});
+      L.fases[i] = {rot: rotuloFase(novas[i]), est: velha?.est || 0, h, nova: true};
+      mudou++;
+    }
+    for(let i = novas.length; i < L.fases.length; i++) ctx.deleteDoc(ref(docFase(id, i))).catch(() => {});
+    if(L.fases.length > novas.length){ mudou += L.fases.length - novas.length; L.fases.length = novas.length; }
+  }catch(err){ erroNuvem(err); return; }
+  L.atualizada = new Date().toISOString();
+  ctx.sv(); ctx.rend();
+  ctx.ntf(mudou ? `🔄 Lei atualizada: ${mudou} fase(s) mudaram e vão ganhar exercícios novos.` : '✅ A lei já estava atualizada.');
 }
 
 function gmAbrirLei(id){ leiAberta = id; ctx.rend(); window.scrollTo({top: 0}); }
@@ -327,6 +444,7 @@ async function gmIniciarFase(id, i, novos = false){
       d.exercicios = resp.exercicios;
       await gravarDoc(docFase(id, i), d);
       L.fases[i].gerada = true;
+      delete L.fases[i].nova;
       ctx.sv();
     }
   }catch(err){
@@ -561,9 +679,10 @@ function mapaHtml(L){
   return `<div class="flex items-center gap-3 mb-2 flex-wrap">
     <button onclick="gmFecharLei()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold">← Leis</button>
     <h3 class="text-xl font-bold flex-1 break-words">⚖️ ${esc(L.nome)}</h3>
+    ${L.fonte ? `<button onclick="gmAtualizarLei('${L.id}')" title="Buscar a versão atual no Planalto" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg text-sm font-bold">🔄 Atualizar do Planalto</button>` : ''}
     <button onclick="gmExcluirLei('${L.id}')" class="text-sm text-red-500 hover:text-red-700 font-bold">🗑️ Excluir</button>
   </div>
-  <p class="text-sm text-gray-500 mb-6">${feitas} de ${L.fases.length} fases concluídas · ${L.nArt} artigos. Toque numa fase para começar.</p>
+  <p class="text-sm text-gray-500 mb-6">${feitas} de ${L.fases.length} fases concluídas · ${L.nArt} artigos${L.fonte ? ` · <a href="${esc(L.fonte)}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">Planalto</a>${L.atualizada ? ` (conferida em ${new Date(L.atualizada).toLocaleDateString('pt-BR')})` : ''}` : ''}. Toque numa fase para começar.</p>
   <div class="flex flex-col items-center gap-5 pb-8">
     ${L.fases.map((f, i) => {
       const livre = liberada(L, i), atualF = i === proxima;
@@ -572,6 +691,7 @@ function mapaHtml(L){
         ${atualF && livre ? `<span class="text-xs font-bold text-green-700 bg-white border-2 border-green-300 rounded-lg px-2 py-0.5 mb-1 animate-bounce">COMEÇAR</span>` : ''}
         <button ${livre ? `onclick="gmFase('${L.id}',${i})"` : 'disabled'} title="${esc(f.rot)}" class="w-16 h-16 rounded-full ${cor} text-white text-xl font-bold flex items-center justify-center ${livre ? 'hover:brightness-110 active:translate-y-1' : 'cursor-not-allowed'}">${livre ? (f.est ? '★' : i + 1) : '🔒'}</button>
         <p class="text-[11px] text-gray-500 mt-2 max-w-[140px] text-center leading-tight">${esc(f.rot)}</p>
+        ${f.nova ? '<span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 rounded px-1">texto atualizado</span>' : ''}
         ${f.est ? `<div class="text-xs">${estrelas(f.est)}</div>` : ''}
       </div>`;
     }).join('')}
