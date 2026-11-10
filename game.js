@@ -129,7 +129,7 @@ function decodificarArquivo(buf){
   try{ return new TextDecoder('utf-8', {fatal: true}).decode(buf); }
   catch{ return new TextDecoder('windows-1252').decode(buf); }
 }
-// No Planalto a redação antiga (revogada/alterada) aparece riscada: <strike>, <s> ou <del>.
+// No Planalto e na ALESP a redação antiga (revogada/alterada) aparece riscada: <strike>, <s> ou <del>.
 // Tira isso e as notas "(Redação dada pela...)", "(Incluído pela...)", "(Vide...)".
 function htmlParaTexto(html){
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -147,6 +147,7 @@ function hashTexto(t){
   return (h >>> 0).toString(36);
 }
 const hashFase = arts => hashTexto(arts.map(a => a.texto).join('\n'));
+function siteDe(url){ return /al\.sp\.gov\.br/i.test(url || '') ? 'da ALESP' : 'do Planalto'; }
 async function buscarPlanalto(url){
   const token = await ctx.auth.currentUser.getIdToken();
   const r = await fetch('/api/buscar-lei', {
@@ -175,7 +176,7 @@ function artigosDe(texto, selecao){
 // crescente, então um "Art." com número menor que o anterior é citação, não artigo novo.
 function separarArtigos(texto){
   const t = texto.replace(/\r/g, '').replace(/[ \t ]+/g, ' ');
-  const re = /(?:^|\n) ?(?:Art\.|Artigo) ?(\d{1,3}(?:\.\d{3})*) ?([º°o])?\.? ?(?: ?- ?([A-Z]{1,2})\b)?/g;
+  const re = /(?:^|\n) ?(?:Art\.|Artigo) ?(\d{1,3}(?:\.\d{3})*) ?\.?([º°o])?\.?(?:-([A-Z]{1,2})\b)?/g;
   const marcas = [];
   let m, ultimo = -1, corte = t.length;
   while((m = re.exec(t))){
@@ -210,7 +211,7 @@ function lerSelecao(texto){
       if(ate >= de && ate - de <= 2000) for(let n = de; n <= ate; n++) nums.add(n);
     }
   };
-  const refs = [...String(texto || '').matchAll(/\bArts?\.?\s*((?:\d[\d.]*\s*[º°o]?(?:\s*-\s*[A-Z]{1,2}\b)?\s*(?:,|e|a|até|ao|-|–)?\s*)+)/gi)];
+  const refs = [...String(texto || '').matchAll(/\b(?:Artigos?|Arts?\.?)\s*((?:\d[\d.]*\s*[º°o]?(?:\s*-\s*[A-Z]{1,2}\b)?\s*(?:,|e|a|até|ao|-|–)?\s*)+)/gi)];
   if(refs.length) refs.forEach(r => somar(r[1])); else somar(String(texto || ''));
   return nums;
 }
@@ -250,10 +251,10 @@ function rotuloFase(arts){
 function gmImportar(){
   ctx.modal(`
     <h3 class="text-lg font-bold mb-1">📥 Nova lei</h3>
-    <p class="text-sm text-gray-500 mb-3">Busque a lei no site do Planalto, envie o arquivo (PDF ou página salva) ou cole o texto. O app separa os artigos em fases; os exercícios de cada fase são criados pela IA quando você abrir a fase.</p>
+    <p class="text-sm text-gray-500 mb-3">Busque a lei no site do Planalto ou da ALESP, envie o arquivo (PDF ou página salva) ou cole o texto. O app separa os artigos em fases; os exercícios de cada fase são criados pela IA quando você abrir a fase.</p>
     <label class="block text-sm font-semibold text-gray-700 mb-1">Nome da lei</label>
     <input id="gm-nome" placeholder="Ex: LC 207/79 – Lei Orgânica da PC/SP" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
-    <label class="block text-sm font-semibold text-gray-700 mb-1">🔗 Endereço da lei no Planalto <span class="font-normal text-gray-500">(fica sempre atualizada)</span></label>
+    <label class="block text-sm font-semibold text-gray-700 mb-1">🔗 Endereço da lei no Planalto ou na ALESP <span class="font-normal text-gray-500">(fica sempre atualizada)</span></label>
     <div class="flex gap-2 mb-1">
       <input id="gm-url" placeholder="https://www.planalto.gov.br/ccivil_03/constituicao/constituicao.htm" class="flex-1 min-w-0 border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none">
       <button id="gm-buscar" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 rounded-lg text-sm font-bold whitespace-nowrap">Buscar</button>
@@ -288,9 +289,9 @@ function gmImportar(){
   $('gm-texto').addEventListener('input', () => { fonte = null; previa(); });
   $('gm-buscar').onclick = async () => {
     const url = $('gm-url').value.trim();
-    if(!url){ ctx.ntf('❌ Cole o endereço da lei no Planalto', 'er'); return; }
+    if(!url){ ctx.ntf('❌ Cole o endereço da lei (Planalto ou ALESP)', 'er'); return; }
     $('gm-buscar').disabled = true; $('gm-buscar').textContent = '...';
-    $('gm-previa').innerHTML = '<p class="text-indigo-600">🔗 Buscando no Planalto...</p>';
+    $('gm-previa').innerHTML = '<p class="text-indigo-600">🔗 Buscando a lei...</p>';
     try{
       const d = await buscarPlanalto(url);
       $('gm-texto').value = htmlParaTexto(d.html);
@@ -298,6 +299,7 @@ function gmImportar(){
       const tit = /<title[^>]*>([^<]*)</i.exec(d.html)?.[1]?.trim();
       if(tit && !$('gm-nome').value.trim()) $('gm-nome').value = tit;
       previa();
+      if(d.atualizada) $('gm-previa').insertAdjacentHTML('beforeend', '<p class="text-xs text-green-700 mt-1">✔ Usando a versão atualizada (compilada) da ALESP, com o texto alterado já riscado.</p>');
     }catch(err){
       $('gm-previa').innerHTML = `<p class="text-red-600">${esc(err.message || err)}</p>`;
     }
@@ -357,12 +359,12 @@ function gmImportar(){
 async function gmAtualizarLei(id){
   const L = lei(id);
   if(!L?.fonte) return;
-  ctx.ntf('🔗 Buscando a versão atual no Planalto...');
+  ctx.ntf(`🔗 Buscando a versão atual ${siteDe(L.fonte)}...`);
   let novas;
   try{
     const d = await buscarPlanalto(L.fonte);
     const {artigos} = artigosDe(htmlParaTexto(d.html), L.selecao);
-    if(!artigos.length) throw new Error('Não achei artigos na página do Planalto.');
+    if(!artigos.length) throw new Error(`Não achei artigos na página ${siteDe(L.fonte)}.`);
     novas = montarFases(artigos, L.porFase || 5);
     L.nArt = artigos.length;
   }catch(err){ ctx.ntf('❌ ' + (err.message || err), 'er'); return; }
@@ -404,7 +406,7 @@ function numDoRot(rot){ const m = /Art\.\s*([\d.]+)/.exec(rot || ''); return m ?
 async function artigosDaLei(base){
   if(base.fonte){
     try{ return separarArtigos(htmlParaTexto((await buscarPlanalto(base.fonte)).html)); }
-    catch(err){ console.warn('Planalto indisponível, usando o texto guardado:', err); }
+    catch(err){ console.warn('Site da lei indisponível, usando o texto guardado:', err); }
   }
   const docs = [];
   for(let i = 0; i < base.fases.length; i += 20){
@@ -568,8 +570,8 @@ function gmFase(id, i){
 // O texto vem quebrado em linhas do PDF/página; junta as linhas de cada parte da lei
 // (caput, inciso, alínea, parágrafo) e mostra cada uma com seu destaque.
 const RE_PARTE = [
-  ['art', /^(Art\.?\s*[\d.]+\s*[º°o]?(?:\s*-\s*[A-Z]{1,2})?\.?)\s*(.*)$/],
-  ['par', /^(§\s*\d+\s*[º°o]?\.?|Par[áa]grafo [úu]nico\.?)\s*(.*)$/i],
+  ['art', /^((?:Art\.?|Artigo)\s*\d[\d.]*\s*[º°o]?(?:-[A-Z]{1,2}\b)?\.?)\s*[-–—]?\s*(.*)$/],
+  ['par', /^(§\s*\d+\.?\s*[º°o]?\.?|Par[áa]grafo [úu]nico\.?)\s*[-–—]?\s*(.*)$/i],
   ['inc', /^([IVXLCDM]+)\s*[-–—]\s*(.*)$/],
   ['ali', /^([a-z])\)\s*(.*)$/],
   ['item', /^(\d{1,2})\.\s+(.*)$/],
@@ -595,7 +597,7 @@ function formatarArtigo(texto){
   return blocos.map(b => {
     const t = destacar(b.txt);
     switch(b.tipo){
-      case 'art':  return `<p class="mb-2"><span class="inline-block bg-indigo-600 text-white text-xs font-bold rounded-md px-2 py-0.5 mr-1 align-middle">${esc(b.rot.replace(/\.$/, ''))}</span>${t}</p>`;
+      case 'art':  return `<p class="mb-2"><span class="inline-block bg-indigo-600 text-white text-xs font-bold rounded-md px-2 py-0.5 mr-1 align-middle">${esc(b.rot.replace(/^Artigo/, 'Art.').replace(/(\d)\.\s*([º°o])/, '$1$2').replace(/\.$/, ''))}</span>${t}</p>`;
       case 'par':  return `<div class="my-2 bg-amber-50 border-l-4 border-amber-300 rounded-r-lg px-3 py-2"><b class="text-amber-800">${esc(b.rot.replace(/\.$/, ''))}</b> ${t}</div>`;
       case 'inc':  return `<div class="flex gap-2 py-1 pl-2 border-l-2 border-indigo-100 ml-1"><span class="w-10 flex-shrink-0 text-right font-bold text-indigo-600">${esc(b.rot)}</span><span class="flex-1">${t}</span></div>`;
       case 'ali':  return `<div class="flex gap-2 py-0.5 pl-14"><span class="flex-shrink-0 font-bold text-gray-500">${esc(b.rot)})</span><span class="flex-1">${t}</span></div>`;
@@ -879,7 +881,7 @@ function mapaHtml(L){
   return `<div class="flex items-center gap-3 mb-3 flex-wrap">
     <button onclick="gmFecharLei()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold">← Leis</button>
     <h3 class="text-xl font-bold flex-1 break-words">⚖️ ${esc(base.nome)}</h3>
-    ${L.fonte ? `<button onclick="gmAtualizarLei('${L.id}')" title="Buscar a versão atual no Planalto" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg text-sm font-bold">🔄 Atualizar do Planalto</button>` : ''}
+    ${L.fonte ? `<button onclick="gmAtualizarLei('${L.id}')" title="Buscar a versão atual ${siteDe(L.fonte)}" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg text-sm font-bold">🔄 Atualizar ${siteDe(L.fonte)}</button>` : ''}
     ${L.base ? `<button onclick="gmFiltro('${base.id}','${L.id}')" class="text-sm text-gray-500 hover:text-gray-800 font-bold">✏️ Editar filtro</button>` : ''}
     <button onclick="gmExcluirLei('${L.id}')" class="text-sm text-red-500 hover:text-red-700 font-bold">🗑️ ${L.base ? 'Excluir filtro' : 'Excluir'}</button>
   </div>
@@ -889,7 +891,7 @@ function mapaHtml(L){
     ${filtrosDe(base).map(x => chip(x, '🎯 ' + esc(x.filtro))).join('')}
     <button onclick="gmFiltro('${base.id}')" class="px-3 py-1.5 rounded-full text-sm font-bold border-2 border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50">+ Novo filtro</button>
   </div>
-  <p class="text-sm text-gray-500 mb-6">${feitas} de ${L.fases.length} fases concluídas · ${L.nArt} artigos${L.fonte ? ` · <a href="${esc(L.fonte)}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">Planalto</a>${L.atualizada ? ` (conferida em ${new Date(L.atualizada).toLocaleDateString('pt-BR')})` : ''}` : ''}. Toque numa fase para começar.</p>
+  <p class="text-sm text-gray-500 mb-6">${feitas} de ${L.fases.length} fases concluídas · ${L.nArt} artigos${L.fonte ? ` · <a href="${esc(L.fonte)}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">${/al\.sp\.gov/.test(L.fonte) ? 'ALESP' : 'Planalto'}</a>${L.atualizada ? ` (conferida em ${new Date(L.atualizada).toLocaleDateString('pt-BR')})` : ''}` : ''}. Toque numa fase para começar.</p>
   ${mapaFasesHtml(L, desloc, proxima)}`;
 }
 function mapaFasesHtml(L, desloc, proxima){
