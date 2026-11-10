@@ -2528,11 +2528,7 @@ function cadVincular(materiaId){
       <div class="modal-box fade" style="max-width:520px;max-height:90vh;overflow-y:auto">
         <h3 class="text-lg font-bold mb-1">🔗 Vincular cadernos da mesma matéria</h3>
         <p class="text-sm text-gray-500 mb-4">Marque os cadernos que são da mesma matéria que <b>${escHtml(m.nome)}</b>. Cada um continua com seus tópicos, mas dentro de qualquer um deles você vê e abre os tópicos de todos.</p>
-        ${outros.length?`<div class="space-y-1 mb-3">${parecidos.length?parecidos.map(linha).join(''):`<p class="text-gray-500 text-sm">Não há outro caderno de <b>${escHtml(m.nome)}</b> para vincular.</p>
-          ${m.topicos.length>1?`<div class="bg-indigo-50 border-2 border-indigo-200 rounded-lg p-3 mt-2">
-            <p class="text-sm text-indigo-900 mb-2">Quer juntar os <b>tópicos deste caderno</b> (ex.: os resumos e o NotebookLM) num bloco que se move junto?</p>
-            <button onclick="cadVincularTopicos('${m.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold">🔗 Vincular tópicos deste caderno</button>
-          </div>`:''}`}</div>
+        ${outros.length?`<div class="space-y-1 mb-3">${parecidos.length?parecidos.map(linha).join(''):`<p class="text-gray-400 text-sm">Nenhum caderno com nome parecido com <b>${escHtml(m.nome)}</b>.</p>`}</div>
         ${resto.length?`<button type="button" onclick="this.nextElementSibling.classList.toggle('hidden');this.remove()" class="text-sm text-indigo-600 hover:underline font-semibold mb-3">+ Mostrar os outros cadernos (${resto.length})</button>
         <div class="hidden space-y-1 mb-4 border-t pt-3"><p class="text-xs text-gray-400 mb-1">Use se a matéria tiver outro nome (ex.: "Gramática" para Português).</p>${resto.map(linha).join('')}</div>`:''}`:'<p class="text-gray-400 text-sm mb-4">Não há outros cadernos.</p>'}
         <div class="flex gap-3">
@@ -2595,7 +2591,7 @@ function renderCaderno(c){
 <div class="flex items-center gap-3 mb-5 flex-wrap">
   <button onclick="cadVoltar()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold">← Cadernos</button>
   <h2 class="text-2xl font-bold flex-1 break-words" style="color:${cor}">📓 ${escHtml(aberta.nome)}</h2>
-  <button onclick="cadVincular('${aberta.id}')" title="Ligar este caderno a outros cadernos da mesma matéria" class="text-sm text-indigo-600 hover:text-indigo-800 font-bold">🔗 Vincular cadernos</button>
+  <button onclick="cadVincular('${aberta.id}')" class="text-sm text-indigo-600 hover:text-indigo-800 font-bold">🔗 Vincular</button>
   <button onclick="cadRenomear('${aberta.id}')" class="text-sm text-gray-500 hover:text-gray-800">✏️ Renomear</button>
   <button onclick="cadExcluir('${aberta.id}')" class="text-sm text-red-500 hover:text-red-700">🗑️ Excluir caderno</button>
 </div>
@@ -2615,7 +2611,6 @@ ${e.cronogramas.length>1?`<div class="flex flex-wrap items-center gap-2 mb-4 tex
 </div>`:''}
 <div class="flex flex-wrap items-center gap-2 mb-4">
   <button onclick="cadAddTopico('${aberta.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ Novo tópico</button>
-  ${aberta.topicos.length>1?`<button onclick="cadVincularTopicos('${aberta.id}')" title="Juntar tópicos (ex.: 4 resumos da mesma matéria) num bloco que se move junto" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-4 py-2 rounded-lg text-sm font-bold">🔗 Vincular tópicos</button>`:''}
   <button onclick="cadAddLink('${aberta.id}')" title="Link do NotebookLM, YouTube, Drive..." class="bg-white border-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 px-4 py-2 rounded-lg text-sm font-bold">🔗 Adicionar link</button>
   <button onclick="cadImportarPagina('${aberta.id}')" title="Guardar no caderno uma página pronta (ex.: resumo/artifact do Claude) exatamente como ela é" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-4 py-2 rounded-lg text-sm font-bold">📥 Importar página do Claude</button>
   ${aberta.topicos.length?`<span class="text-gray-300">|</span>
@@ -2632,7 +2627,31 @@ ${aberta.topicos.length + cadVinculados(aberta).reduce((s,x)=>s+x.topicos.length
 <p id="cad-filtro-top-vazio" class="text-gray-400 text-sm mb-3 hidden">Nenhum tópico com esse nome.</p>`:''}
 ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-50 rounded-xl">Nenhum tópico ainda. Clique em "+ Novo tópico".</p>':`
 <ul class="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden" style="border-left:4px solid ${cor}">
-  ${cadListaTopicosHtml(aberta)}
+  ${aberta.topicos.map((t,i)=>{
+    const naJanela = cadQuillTopico===t.id && cadJanela && !cadJanela.closed;
+    const oculto = cadFiltroTop && !cadNorm(t.nome).includes(cadNorm(cadFiltroTop));
+    const ult = aberta.topicos.length-1;
+    return `<li data-top-nome="${escHtml(cadNorm(t.nome))}" data-top-id="${t.id}" draggable="true"
+      ondragstart="cadArrastarIni(event,'${t.id}')" ondragover="cadArrastarSobre(event)" ondragleave="this.classList.remove('cad-alvo')" ondrop="cadSoltar(event,'${aberta.id}','${t.id}')" ondragend="cadArrastarFim()"
+      class="${oculto?'hidden ':''}flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-gray-50'}">
+      <span title="Arraste para mudar a ordem" class="cursor-grab text-gray-300 hover:text-gray-600 select-none flex-shrink-0">⠿</span>
+      <span class="flex flex-col flex-shrink-0 leading-none">
+        <button onclick="cadMoverTopico('${aberta.id}','${t.id}',-1)" title="Subir" ${i===0?'disabled':''} class="text-[10px] px-1 ${i===0?'text-gray-200':'text-gray-400 hover:text-indigo-700'}">▲</button>
+        <button onclick="cadMoverTopico('${aberta.id}','${t.id}',1)" title="Descer" ${i===ult?'disabled':''} class="text-[10px] px-1 ${i===ult?'text-gray-200':'text-gray-400 hover:text-indigo-700'}">▼</button>
+      </span>
+      <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${i+1}.</span>
+      <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
+        <span class="font-semibold text-gray-800 break-words">${cadIconeTopico(t)} ${escHtml(t.nome)}</span>${cadSeloTopico(t)}
+        ${naJanela?'<span class="ml-2 text-xs text-indigo-600 font-bold">● aberto na página solta</span>':''}
+      </button>
+      ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
+      ${t.tipo==='link' ? '' : t.tipo==='html'
+        ? `<button onclick="cadImportarPagina('${aberta.id}','${t.id}')" title="Atualizar com uma versão nova do Claude (mantém grifos e notas)" class="text-xs text-gray-400 hover:text-indigo-700 px-1">🔄</button><button onclick="cadPdfPagina('${t.id}')" title="Salvar em PDF (com grifos e notas)" class="text-xs text-gray-400 hover:text-red-700 px-1">🖨️</button><button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
+        : `<button onclick="cadExportar('${aberta.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>`}
+      <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
+      <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
+    </li>`;
+  }).join('')}
 </ul>`}
 ${cadVinculados(aberta).filter(x=>x.topicos.length).map(x=>`
 <div class="mt-6">
@@ -3030,150 +3049,13 @@ function cadFiltrarTopicos(valor){
   document.getElementById('cad-filtro-top-vazio')?.classList.toggle('hidden', visiveis>0);
 }
 // ----- Ordem dos tópicos (setas ou arrastar) -----
-// ----- Tópicos vinculados (bloco) -----
-// Tópicos com o mesmo t.bloco ficam sempre juntos e se movem como uma peça só.
-// O nome do bloco fica em m.blocos[id].
-function cadJuntarBlocos(m){
-  const vistos = new Set(), out = [];
-  m.topicos.forEach(t=>{
-    if(!t.bloco){ out.push(t); return; }
-    if(vistos.has(t.bloco)) return;
-    vistos.add(t.bloco);
-    out.push(...m.topicos.filter(x=>x.bloco===t.bloco));
-  });
-  m.topicos = out;
-}
-// pedaços da lista: um tópico solto ou um bloco inteiro
-function cadUnidades(m){
-  cadJuntarBlocos(m);
-  const u = [];
-  m.topicos.forEach(t=>{
-    const ult = u[u.length-1];
-    if(t.bloco && ult && ult.bloco===t.bloco) ult.itens.push(t);
-    else u.push({bloco:t.bloco||null, itens:[t]});
-  });
-  return u;
-}
-function cadLimparBlocos(m){
-  const cont = {};
-  m.topicos.forEach(t=>{ if(t.bloco) cont[t.bloco] = (cont[t.bloco]||0) + 1; });
-  m.topicos.forEach(t=>{ if(t.bloco && cont[t.bloco]<2) delete t.bloco; });
-  Object.keys(m.blocos||{}).forEach(b=>{ if(!cont[b] || cont[b]<2) delete m.blocos[b]; });
-}
 function cadMoverTopico(materiaId, topicoId, dir){
   const m = cad().materias.find(x=>x.id===materiaId);
   if(!m) return;
-  const u = cadUnidades(m);
-  const k = u.findIndex(x=>x.itens.some(t=>t.id===topicoId));
-  if(k<0) return;
-  if(u[k].bloco){ // dentro do bloco: troca com o vizinho do mesmo bloco
-    const it = u[k].itens, i = it.findIndex(t=>t.id===topicoId), j = i + dir;
-    if(j<0 || j>=it.length) return;
-    [it[i], it[j]] = [it[j], it[i]];
-  } else {
-    const j = k + dir;
-    if(j<0 || j>=u.length) return;
-    [u[k], u[j]] = [u[j], u[k]];
-  }
-  m.topicos = u.flatMap(x=>x.itens);
+  const i = m.topicos.findIndex(t=>t.id===topicoId), j = i + dir;
+  if(i<0 || j<0 || j>=m.topicos.length) return;
+  [m.topicos[i], m.topicos[j]] = [m.topicos[j], m.topicos[i]];
   sv(); rend();
-}
-function cadMoverBloco(materiaId, bloco, dir){
-  const m = cad().materias.find(x=>x.id===materiaId);
-  if(!m) return;
-  const u = cadUnidades(m);
-  const k = u.findIndex(x=>x.bloco===bloco), j = k + dir;
-  if(k<0 || j<0 || j>=u.length) return;
-  [u[k], u[j]] = [u[j], u[k]];
-  m.topicos = u.flatMap(x=>x.itens);
-  sv(); rend();
-}
-function cadVincularTopicos(materiaId, bloco){
-  const m = cad().materias.find(x=>x.id===materiaId);
-  if(!m) return;
-  cadJuntarBlocos(m);
-  const nomeAtual = bloco ? (m.blocos||{})[bloco] || '' : '';
-  document.getElementById('modal-root').innerHTML = `
-    <div class="modal-overlay" id="modal-overlay">
-      <div class="modal-box fade" style="max-width:540px;max-height:90vh;overflow-y:auto">
-        <h3 class="text-lg font-bold mb-1">🔗 ${bloco?'Editar tópicos vinculados':'Vincular tópicos'}</h3>
-        <p class="text-sm text-gray-500 mb-3">Os tópicos marcados viram um bloco: ficam juntos na lista e, ao mudar um de lugar, os outros vão junto.</p>
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do bloco</label>
-        <input id="vt-nome" value="${escHtml(nomeAtual)}" placeholder="Ex: Concordância (4 resumos)" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
-        <div class="space-y-1 mb-4 max-h-[50vh] overflow-y-auto">${m.topicos.map(t=>{
-          const outro = t.bloco && t.bloco!==bloco ? (m.blocos||{})[t.bloco] || 'outro bloco' : '';
-          return `<label class="flex items-center gap-3 px-3 py-2 rounded-lg border-2 border-gray-100 hover:bg-gray-50 cursor-pointer">
-            <input type="checkbox" value="${t.id}" ${bloco && t.bloco===bloco?'checked':''} class="vt-top w-4 h-4 accent-indigo-600">
-            <span class="flex-1 font-semibold text-gray-800">${cadIconeTopico(t)} ${escHtml(t.nome)}</span>
-            ${outro?`<span class="text-xs text-gray-400">em "${escHtml(outro)}"</span>`:''}
-          </label>`;
-        }).join('')}</div>
-        <div class="flex gap-3">
-          ${bloco?`<button onclick="cadSalvarTopicosVinculados('${m.id}','${bloco}',true)" class="border-2 border-red-200 text-red-600 rounded-lg px-3 py-2.5 font-semibold hover:bg-red-50">Desvincular</button>`:''}
-          <button onclick="document.getElementById('modal-root').innerHTML=''" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
-          <button onclick="cadSalvarTopicosVinculados('${m.id}','${bloco||''}')" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Salvar</button>
-        </div>
-      </div>
-    </div>`;
-}
-function cadSalvarTopicosVinculados(materiaId, bloco, desfazer=false){
-  const m = cad().materias.find(x=>x.id===materiaId);
-  if(!m) return;
-  const marcados = desfazer ? new Set() : new Set([...document.querySelectorAll('.vt-top:checked')].map(el=>el.value));
-  if(!desfazer && marcados.size<2){ ntf('❌ Marque pelo menos 2 tópicos','er'); return; }
-  const id = bloco || ('tb'+Date.now().toString(36));
-  if(bloco) m.topicos.forEach(t=>{ if(t.bloco===bloco && !marcados.has(t.id)) delete t.bloco; });
-  // o bloco fica no lugar do primeiro tópico marcado
-  m.topicos.forEach(t=>{ if(marcados.has(t.id)) t.bloco = id; });
-  m.blocos ||= {};
-  if(marcados.size) m.blocos[id] = document.getElementById('vt-nome').value.trim();
-  cadLimparBlocos(m);
-  cadJuntarBlocos(m);
-  document.getElementById('modal-root').innerHTML = '';
-  sv(); rend();
-  ntf(desfazer ? 'Tópicos desvinculados.' : `🔗 ${marcados.size} tópicos vinculados!`);
-}
-// bloco: tópico vinculado — as setas movem o bloco inteiro
-function cadLinhaTopicoHtml(m, t, n, podeSubir, podeDescer, bloco){
-  const mover = d => bloco ? `cadMoverBloco('${m.id}','${bloco}',${d})` : `cadMoverTopico('${m.id}','${t.id}',${d})`;
-  const naJanela = cadQuillTopico===t.id && cadJanela && !cadJanela.closed;
-  const oculto = cadFiltroTop && !cadNorm(t.nome).includes(cadNorm(cadFiltroTop));
-  return `<li data-top-nome="${escHtml(cadNorm(t.nome))}" data-top-id="${t.id}" draggable="true"
-      ondragstart="cadArrastarIni(event,'${t.id}')" ondragover="cadArrastarSobre(event)" ondragleave="this.classList.remove('cad-alvo')" ondrop="cadSoltar(event,'${m.id}','${t.id}')" ondragend="cadArrastarFim()"
-      class="${oculto?'hidden ':''}flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-white/70'}">
-      <span title="${bloco?'Arraste para mover os tópicos vinculados (soltando sobre outro do grupo, troca a ordem dentro dele)':'Arraste para mudar a ordem'}" class="cursor-grab text-gray-300 hover:text-gray-600 select-none flex-shrink-0">⠿</span>
-      <span class="flex flex-col flex-shrink-0 leading-none">
-        <button onclick="${mover(-1)}" title="${bloco?'Subir junto com os vinculados':'Subir'}" ${podeSubir?'':'disabled'} class="text-[10px] px-1 ${podeSubir?'text-gray-400 hover:text-indigo-700':'text-gray-200'}">▲</button>
-        <button onclick="${mover(1)}" title="${bloco?'Descer junto com os vinculados':'Descer'}" ${podeDescer?'':'disabled'} class="text-[10px] px-1 ${podeDescer?'text-gray-400 hover:text-indigo-700':'text-gray-200'}">▼</button>
-      </span>
-      <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${n}.</span>
-      <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
-        <span class="font-semibold text-gray-800 break-words">${cadIconeTopico(t)} ${escHtml(t.nome)}</span>${cadSeloTopico(t)}
-        ${naJanela?'<span class="ml-2 text-xs text-indigo-600 font-bold">● aberto na página solta</span>':''}
-      </button>
-      ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
-      ${t.tipo==='link' ? '' : t.tipo==='html'
-        ? `<button onclick="cadImportarPagina('${m.id}','${t.id}')" title="Atualizar com uma versão nova do Claude (mantém grifos e notas)" class="text-xs text-gray-400 hover:text-indigo-700 px-1">🔄</button><button onclick="cadPdfPagina('${t.id}')" title="Salvar em PDF (com grifos e notas)" class="text-xs text-gray-400 hover:text-red-700 px-1">🖨️</button><button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
-        : `<button onclick="cadExportar('${m.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>`}
-      <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
-      <button onclick="cadExcluir('${t.id}')" title="Excluir tópico" class="text-xs text-gray-400 hover:text-red-600 px-1">🗑️</button>
-    </li>`;
-}
-const CAD_CORES_BLOCO = ['#6366f1','#0ea5e9','#10b981','#f59e0b','#ec4899','#8b5cf6'];
-function cadListaTopicosHtml(m){
-  const u = cadUnidades(m);
-  const blocos = [...new Set(u.filter(x=>x.bloco).map(x=>x.bloco))];
-  let n = 0;
-  return u.map((x,k)=>{
-    if(!x.bloco){ n++; return cadLinhaTopicoHtml(m, x.itens[0], n, k>0, k<u.length-1); }
-    const cor = CAD_CORES_BLOCO[blocos.indexOf(x.bloco) % CAD_CORES_BLOCO.length];
-    // sem cabeçalho: só uma moldura grossa colorida em volta dos tópicos vinculados
-    const membros = x.itens.map(t=>{ n++; return cadLinhaTopicoHtml(m, t, n, k>0, k<u.length-1, x.bloco); }).join('');
-    return `<li class="relative px-2 py-2">
-      <ul class="rounded-xl overflow-hidden divide-y" style="border:3px solid ${cor};background:${cor}12">${membros}</ul>
-      <button onclick="cadVincularTopicos('${m.id}','${x.bloco}')" title="Tópicos vinculados${(m.blocos||{})[x.bloco]?': '+escHtml(m.blocos[x.bloco]):''} — editar ou desvincular" class="absolute top-0 right-5 bg-white border-2 rounded-full w-6 h-6 text-[11px] flex items-center justify-center hover:scale-110 transition-transform" style="border-color:${cor}">🔗</button>
-    </li>`;
-  }).join('');
 }
 let cadArrastando = null;
 function cadArrastarIni(ev, id){
@@ -3198,25 +3080,10 @@ function cadSoltar(ev, materiaId, alvoId){
   cadArrastarFim();
   const m = cad().materias.find(x=>x.id===materiaId);
   if(!m || !id || id===alvoId) return;
-  const u = cadUnidades(m);
-  const alvoT = m.topicos.find(t=>t.id===alvoId);
-  const arrastT = id.startsWith('b:') ? null : m.topicos.find(t=>t.id===id);
-  if(!alvoT) return;
-  // dentro do mesmo bloco: só reordena ali dentro
-  if(arrastT && arrastT.bloco && arrastT.bloco===alvoT.bloco){
-    const it = u.find(x=>x.bloco===arrastT.bloco).itens;
-    const de = it.indexOf(arrastT), para = it.indexOf(alvoT);
-    it.splice(de, 1);
-    it.splice(para, 0, arrastT); // mesmo jeito da lista: descendo fica depois do alvo, subindo fica antes
-  } else {
-    // senão move o pedaço inteiro (tópico solto ou o bloco todo) para o lugar do pedaço de destino
-    const de = id.startsWith('b:') ? u.findIndex(x=>x.bloco===id.slice(2)) : u.findIndex(x=>x.itens.includes(arrastT));
-    const para = u.findIndex(x=>x.itens.includes(alvoT));
-    if(de<0 || para<0 || de===para) return;
-    const [peca] = u.splice(de, 1);
-    u.splice(para, 0, peca);
-  }
-  m.topicos = u.flatMap(x=>x.itens);
+  const de = m.topicos.findIndex(t=>t.id===id), para = m.topicos.findIndex(t=>t.id===alvoId);
+  if(de<0 || para<0) return;
+  const [t] = m.topicos.splice(de, 1);
+  m.topicos.splice(para, 0, t); // fica no lugar de quem estava ali (descendo: logo depois dele; subindo: logo antes)
   sv(); rend();
 }
 // Filtra a estante sem redesenhar a tela (assim o campo não perde o foco enquanto digita)
@@ -3794,7 +3661,7 @@ async function cadExcluir(id){
     : `Excluir o tópico "${achado.t.nome}"? Isso não pode ser desfeito.`;
   if(!confirm(msg)) return;
   if(m){ cad().materias = cad().materias.filter(x=>x.id!==id); cadMatAberta = null; cadLimparGrupos(); }
-  else { achado.m.topicos = achado.m.topicos.filter(x=>x.id!==id); cadLimparBlocos(achado.m); }
+  else achado.m.topicos = achado.m.topicos.filter(x=>x.id!==id);
   topicos.forEach(t=>{
     if(cadPendente===t.id) cadPendente=null;
     if(cadQuillTopico===t.id){
@@ -4893,9 +4760,6 @@ ${e.cronogramas.length>1&&pdEscopo()==='todos'?pdResumoPorPlano():''}
   window.cadAlternarPlano = cadAlternarPlano;
   window.cadVincular = cadVincular;
   window.cadAddLink = cadAddLink;
-  window.cadMoverBloco = cadMoverBloco;
-  window.cadVincularTopicos = cadVincularTopicos;
-  window.cadSalvarTopicosVinculados = cadSalvarTopicosVinculados;
   window.cadSalvarVinculos = cadSalvarVinculos;
   window.cadExportar = cadExportar;
   window.cadImportarPagina = cadImportarPagina;
