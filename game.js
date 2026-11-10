@@ -37,7 +37,7 @@ let licao = null;       // lição em andamento
 export function iniciarGame(contexto){
   ctx = contexto;
   Object.assign(window, {
-    gmImportar, gmAtualizarLei, gmFiltro, gmTrocarCenario, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
+    gmImportar, gmAtualizarLei, gmFiltro, gmTrocarCenario, gmConcurso, gmExcluirConcurso, gmVerConcurso, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
     gmAvatar, gmEscolherAvatar, gmEscolher, gmOrdenar, gmDesordenar, gmVerificar, gmContinuar, gmSair, gmFimLicao,
   });
 }
@@ -211,7 +211,8 @@ function lerSelecao(texto){
       if(ate >= de && ate - de <= 2000) for(let n = de; n <= ate; n++) nums.add(n);
     }
   };
-  const refs = [...String(texto || '').matchAll(/\b(?:Artigos?|Arts?\.?)\s*((?:\d[\d.]*\s*[º°o]?(?:\s*-\s*[A-Z]{1,2}\b)?\s*(?:,|e|a|até|ao|-|–)?\s*)+)/gi)];
+  // "e"/"a" só como palavra inteira, e sem passar de uma linha para a outra (senão o "A" de "Arts." da linha de baixo some)
+  const refs = [...String(texto || '').matchAll(/\b(?:Artigos?|Arts?\.?)[ \t]*((?:\d[\d.]*[ \t]*[º°o]?(?:[ \t]*-[ \t]*[A-Z]{1,2}\b)?[ \t]*(?:,|;|-|–|(?:e|a|até|ao)(?![A-Za-zÀ-ú]))?[ \t]*)+)/gi)];
   if(refs.length) refs.forEach(r => somar(r[1])); else somar(String(texto || ''));
   return nums;
 }
@@ -545,9 +546,219 @@ async function gmExcluirLei(id){
   if(!confirm(msg)) return;
   const sair = [L, ...filhos];
   g().leis = g().leis.filter(x => !sair.includes(x));
+  concursos().forEach(K => K.itens.forEach(it => {
+    if(sair.some(x => x.id === it.filtroId)) it.filtroId = null;
+    if(sair.some(x => x.id === it.leiId)){ it.leiId = null; it.filtroId = null; }
+  }));
   leiAberta = L.base && lei(L.base) ? L.base : null;
   ctx.sv(); ctx.rend();
   sair.forEach(x => x.fases.forEach((f, i) => ctx.deleteDoc(ref(docFase(x.id, i))).catch(() => {})));
+}
+
+// ---------- concursos: um filtro geral que recorta várias leis de uma vez ----------
+// Tabela colada (Trilha | Artigos | Origem). Cada lei do game ganha um filtro com o nome do concurso;
+// "lei inteira" usa a própria lei; o que não está no game aparece como faltando.
+let concursoSel = null;
+function concursos(){ return g().concursos ||= []; }
+function lerTabelaConcurso(texto){
+  const linhas = [];
+  String(texto || '').split(/\r?\n/).forEach(l => {
+    const cols = l.split(/\t|\s{2,}|\s*\|\s*/).map(c => c.trim()).filter(Boolean);
+    if(cols.length < 2 || /^trilha$/i.test(cols[0])) return;
+    linhas.push({trilha: cols[0], artigos: cols[1], origem: cols.slice(2).join(' ')});
+  });
+  return linhas;
+}
+const PALAVRAS_LEI = new Set(['lei', 'de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'n', 'no', 'na', 'em', 'complementar']);
+function palavrasLei(nome){
+  return String(nome || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .split(/[^a-z0-9]+/).filter(w => w.length > 1 && !PALAVRAS_LEI.has(w)).map(w => w.slice(0, 6));
+}
+// sigla pelas iniciais: "Lei de Acesso à Informação" → "lai"
+function siglaDe(nome){
+  return String(nome || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+    .split(/[^a-z]+/).filter(w => w && !['de', 'da', 'do', 'das', 'dos', 'e', 'a', 'o', 'em', 'na', 'no'].includes(w)).map(w => w[0]).join('');
+}
+// lei do game que mais combina com o nome da trilha ("Constituição" → "Constituição Federal", "LAI" → "Lei de Acesso à Informação")
+function acharLei(trilha){
+  const t = palavrasLei(trilha), sig = trilha.replace(/[^A-Za-z]/g, '').toLowerCase();
+  let melhor = null, pts = 0;
+  g().leis.filter(L => !L.base).forEach(L => {
+    const w = new Set(palavrasLei(L.nome));
+    let p = t.filter(x => w.has(x)).length;
+    if(sig.length >= 2 && sig === trilha.trim().toLowerCase() && siglaDe(L.nome).includes(sig)) p += 2;
+    if(sig.length >= 2 && new RegExp('\\b' + sig + '\\b', 'i').test(L.nome)) p += 2;
+    const nota = p - 0.01 * (w.size - p); // empate: fica a de nome mais curto ("Código Penal" antes de "Código de Processo Penal")
+    if(p > 0 && nota > pts){ pts = nota; melhor = L; }
+  });
+  return melhor;
+}
+const ehInteira = artigos => /inteir[ao]|completa|toda/i.test(artigos);
+// agrupa as linhas por trilha (o Código Penal pode vir em 3 linhas)
+function agruparTrilhas(linhas){
+  const grupos = [];
+  linhas.forEach(l => {
+    let gr = grupos.find(x => x.trilha.toLowerCase() === l.trilha.toLowerCase());
+    if(!gr){ gr = {trilha: l.trilha, linhas: []}; grupos.push(gr); }
+    gr.linhas.push(l);
+  });
+  return grupos.map(gr => ({...gr,
+    inteira: gr.linhas.some(l => ehInteira(l.artigos)),
+    selecao: gr.linhas.filter(l => !ehInteira(l.artigos)).map(l => 'Arts. ' + l.artigos.replace(/^arts?\.?\s*/i, '')).join('\n'),
+    origem: [...new Set(gr.linhas.map(l => l.origem).filter(Boolean))].join(' · ')}));
+}
+// cria (ou atualiza) na lei o filtro com o nome do concurso
+async function filtroParaConcurso(base, nome, selecao, porFase){
+  const todos = await artigosDaLei(base);
+  const sel = lerSelecao(selecao);
+  const escolhidos = todos.filter(a => sel.has(a.num));
+  if(!escolhidos.length) throw new Error('nenhum dos artigos está na lei guardada');
+  const novas = montarFases(escolhidos, porFase);
+  let F = filtrosDe(base).find(x => x.filtro === nome);
+  if(F){
+    Object.assign(F, {selecao, porFase, nArt: escolhidos.length});
+    await aplicarFases(F, novas);
+  } else {
+    const id = 'lei' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+    for(let i = 0; i < novas.length; i += 20){
+      await Promise.all(novas.slice(i, i + 20).map((arts, k) => gravarDoc(docFase(id, i + k), {artigos: arts, exercicios: null})));
+    }
+    F = {id, base: base.id, nome: base.nome, filtro: nome, criada: new Date().toISOString(), nArt: escolhidos.length,
+      fonte: base.fonte || null, selecao, porFase, fases: novas.map(arts => ({rot: rotuloFase(arts), est: 0, h: hashFase(arts)}))};
+    g().leis.push(F);
+  }
+  return F;
+}
+function gmConcurso(id){
+  const K = id ? concursos().find(x => x.id === id) : null;
+  const bases = g().leis.filter(L => !L.base);
+  ctx.modal(`
+    <h3 class="text-lg font-bold mb-1">🏆 ${K ? 'Editar concurso' : 'Novo concurso'}</h3>
+    <p class="text-sm text-gray-500 mb-3">Cole a tabela do edital (Trilha · Artigos · Origem). Cada lei do game ganha um filtro com o nome do concurso; "lei inteira" usa a lei toda.</p>
+    <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do concurso</label>
+    <input id="gc-nome" value="${esc(K?.nome || '')}" placeholder="Ex: Fotógrafo PC-SP" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
+    <label class="block text-sm font-semibold text-gray-700 mb-1">Tabela</label>
+    <textarea id="gc-tab" rows="7" placeholder="Trilha&#9;Artigos&#9;Origem&#10;Constituição&#9;1º a 16, 37, 41, 144&#9;edital&#10;Código Penal&#9;312 a 327&#9;edital&#10;LAI&#9;lei inteira&#9;edital" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs font-mono focus:border-indigo-500 focus:outline-none">${esc(K?.tabela || '')}</textarea>
+    <div class="flex items-center gap-2 mt-2 text-sm">
+      <label class="font-semibold text-gray-700">Artigos por fase:</label>
+      <select id="gc-por" class="border-2 border-gray-300 rounded-lg px-2 py-1">${[3, 5, 8].map(n => `<option ${(K?.porFase || 5) === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    </div>
+    <div id="gc-previa" class="mt-3"></div>
+    <div class="flex gap-3 mt-5">
+      <button onclick="document.getElementById('modal-root').innerHTML=''" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+      <button id="gc-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700 disabled:opacity-50">${K ? 'Salvar' : 'Criar concurso'}</button>
+    </div>`, 760);
+  const $ = x => document.getElementById(x);
+  let grupos = [];
+  const escolha = {}; // trilha → id da lei escolhida na lista ('' = não está no game)
+  (K?.itens || []).forEach(it => { escolha[it.trilha.toLowerCase()] = it.leiId || ''; });
+  const previa = () => {
+    grupos = agruparTrilhas(lerTabelaConcurso($('gc-tab').value));
+    $('gc-previa').innerHTML = !grupos.length ? '' : `<table class="w-full text-sm">
+      <thead><tr class="text-left text-xs text-gray-500 uppercase"><th class="py-1">Trilha</th><th class="py-1">Artigos</th><th class="py-1">Lei no game</th></tr></thead>
+      <tbody>${grupos.map((gr, i) => {
+        const k = gr.trilha.toLowerCase();
+        if(!(k in escolha)) escolha[k] = acharLei(gr.trilha)?.id || '';
+        const n = gr.inteira ? null : lerSelecao(gr.selecao).size;
+        return `<tr class="border-t border-gray-100 align-top">
+          <td class="py-1.5 pr-2 font-semibold text-gray-800">${esc(gr.trilha)}${gr.origem ? `<div class="text-[11px] font-normal text-gray-400">${esc(gr.origem)}</div>` : ''}</td>
+          <td class="py-1.5 pr-2 text-xs text-gray-600">${gr.inteira ? '<b>lei inteira</b>' : `${n} artigo(s)`}<div class="text-[11px] text-gray-400">${esc(gr.linhas.map(l => l.artigos).join(' · '))}</div></td>
+          <td class="py-1.5"><select data-trilha="${esc(k)}" class="gc-lei w-full border-2 ${escolha[k] ? 'border-green-300' : 'border-amber-300'} rounded-lg px-1 py-1 text-xs">
+            <option value="">⚠ não está no game</option>
+            ${bases.map(L => `<option value="${L.id}" ${escolha[k] === L.id ? 'selected' : ''}>${esc(L.nome)}</option>`).join('')}
+          </select></td>
+        </tr>`;
+      }).join('')}</tbody></table>
+      <p class="text-xs text-gray-400 mt-2">Confira se cada trilha caiu na lei certa. As que estão "não está no game" ficam na lista do concurso para você importar depois.</p>`;
+    document.querySelectorAll('.gc-lei').forEach(sel => sel.onchange = () => { escolha[sel.dataset.trilha] = sel.value; previa(); });
+  };
+  $('gc-tab').addEventListener('input', previa);
+  previa();
+  $('gc-salvar').onclick = async () => {
+    const nome = $('gc-nome').value.trim(), porFase = +$('gc-por').value;
+    if(!nome){ ctx.ntf('❌ Dê um nome para o concurso', 'er'); return; }
+    if(!grupos.length){ ctx.ntf('❌ Cole a tabela do edital', 'er'); return; }
+    $('gc-salvar').disabled = true;
+    const itens = [], erros = [];
+    for(const [i, gr] of grupos.entries()){
+      $('gc-salvar').textContent = `Montando ${i + 1} de ${grupos.length}...`;
+      const base = lei(escolha[gr.trilha.toLowerCase()]);
+      const it = {trilha: gr.trilha, artigos: gr.linhas.map(l => l.artigos).join(' · '), origem: gr.origem, inteira: gr.inteira, leiId: base?.id || null, filtroId: null};
+      if(base && !gr.inteira){
+        try{ it.filtroId = (await filtroParaConcurso(base, nome, gr.selecao, porFase)).id; }
+        catch(err){ if(err?.code){ erroNuvem(err); $('gc-salvar').disabled = false; $('gc-salvar').textContent = 'Salvar'; return; } erros.push(`${gr.trilha}: ${err.message || err}`); }
+      }
+      itens.push(it);
+    }
+    const dados = {nome, tabela: $('gc-tab').value, porFase, itens};
+    let Kid = K?.id;
+    if(K){
+      // filtros que eram deste concurso e saíram da tabela: apaga
+      const ficam = new Set(itens.map(x => x.filtroId).filter(Boolean));
+      K.itens.forEach(x => { if(x.filtroId && !ficam.has(x.filtroId)) apagarTrilha(x.filtroId); });
+      if(K.nome !== nome) K.itens.forEach(x => { const F = lei(x.filtroId); if(F && ficam.has(F.id)) F.filtro = nome; });
+      Object.assign(K, dados);
+    } else {
+      Kid = 'cc' + Date.now().toString(36);
+      concursos().push({id: Kid, ...dados});
+    }
+    concursoSel = Kid; leiAberta = null;
+    document.getElementById('modal-root').innerHTML = '';
+    ctx.sv(); ctx.rend();
+    ctx.ntf(erros.length ? `⚠ Concurso salvo, mas: ${erros.join('; ')}` : `🏆 ${nome}: ${itens.filter(x => x.leiId).length} trilha(s) prontas!`, erros.length ? 'warn' : 'ok');
+  };
+}
+function apagarTrilha(id){
+  const F = lei(id);
+  if(!F) return;
+  g().leis = g().leis.filter(x => x !== F);
+  F.fases.forEach((f, i) => ctx.deleteDoc(ref(docFase(id, i))).catch(() => {}));
+}
+function gmExcluirConcurso(id){
+  const K = concursos().find(x => x.id === id);
+  if(!K || !confirm(`Excluir o concurso "${K.nome}" e os filtros que ele criou nas leis? As leis continuam.`)) return;
+  K.itens.forEach(x => { if(x.filtroId) apagarTrilha(x.filtroId); });
+  g().concursos = concursos().filter(x => x !== K);
+  concursoSel = null;
+  ctx.sv(); ctx.rend();
+}
+function gmVerConcurso(id){ concursoSel = id || null; leiAberta = null; ctx.rend(); }
+function cartaoTrilha(L, titulo, sub, extra = ''){
+  const feitas = L.fases.filter(f => f.est > 0).length;
+  const pct = L.fases.length ? Math.round(feitas / L.fases.length * 100) : 0;
+  const est = L.fases.reduce((s, f) => s + notaAtual(f), 0);
+  const revisar = L.fases.filter(f => f.est && notaAtual(f) < f.est).length;
+  return `<button onclick="gmAbrirLei('${L.id}')" class="text-left bg-white border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg rounded-2xl p-4 transition-all">
+      <p class="font-bold text-gray-800 break-words mb-1">${titulo}</p>
+      ${sub ? `<p class="text-xs text-indigo-600 font-semibold mb-1 break-words">${sub}</p>` : ''}
+      <p class="text-xs text-gray-500 mb-3">${L.nArt} artigos · ${L.fases.length} fases · ⭐ ${est}/${L.fases.length * 3}${revisar ? ` · <span class="text-amber-600 font-bold">⏰ ${revisar} p/ revisar</span>` : ''}</p>
+      ${extra}
+      <div class="bg-gray-100 rounded-full h-2.5 overflow-hidden"><div class="bg-green-500 h-2.5 rounded-full" style="width:${pct}%"></div></div>
+      <p class="text-xs text-gray-400 mt-1">${pct}% concluído</p>
+    </button>`;
+}
+function concursoHtml(K){
+  const trilhas = K.itens.map(it => ({it, L: lei(it.inteira ? it.leiId : it.filtroId)}));
+  const fases = trilhas.flatMap(x => x.L ? x.L.fases : []);
+  const feitas = fases.filter(f => f.est > 0).length;
+  const pct = fases.length ? Math.round(feitas / fases.length * 100) : 0;
+  return `<div class="flex items-center gap-3 mb-2 flex-wrap">
+    <h3 class="text-xl font-bold flex-1">🏆 ${esc(K.nome)}</h3>
+    <button onclick="gmConcurso('${K.id}')" class="text-sm text-gray-500 hover:text-gray-800 font-bold">✏️ Editar</button>
+    <button onclick="gmExcluirConcurso('${K.id}')" class="text-sm text-red-500 hover:text-red-700 font-bold">🗑️ Excluir</button>
+  </div>
+  <div class="bg-indigo-50 border-2 border-indigo-100 rounded-xl p-3 mb-4">
+    <p class="text-sm font-bold text-indigo-900">${feitas} de ${fases.length} fases concluídas no concurso · ${pct}%</p>
+    <div class="bg-white rounded-full h-3 overflow-hidden mt-1"><div class="bg-green-500 h-3 rounded-full" style="width:${pct}%"></div></div>
+  </div>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">${trilhas.map(({it, L}) => L
+    ? cartaoTrilha(L, `⚖️ ${esc(it.trilha)}`, it.inteira ? 'lei inteira' : `🎯 ${esc(it.artigos)}`, it.origem ? `<p class="text-[11px] text-gray-400 -mt-2 mb-2">${esc(it.origem)}</p>` : '')
+    : `<div class="bg-amber-50 border-2 border-dashed border-amber-300 rounded-2xl p-4">
+        <p class="font-bold text-gray-800 mb-1">⚠ ${esc(it.trilha)}</p>
+        <p class="text-xs text-gray-600 mb-3">${esc(it.artigos)}${it.origem ? ` · ${esc(it.origem)}` : ''}</p>
+        <p class="text-xs text-amber-700 mb-3">Esta lei ainda não está no game. Importe e depois clique em ✏️ Editar no concurso para ligar.</p>
+        <button onclick="gmImportar()" class="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">📥 Importar lei</button>
+      </div>`).join('')}</div>`;
 }
 
 // ---------- fase: painel, leitura e início ----------
@@ -938,7 +1149,17 @@ function mapaFasesHtml(L, desloc, proxima){
 }
 function listaHtml(){
   const leis = g().leis.filter(L => !L.base);
-  return `<div class="flex items-center gap-3 mb-4 flex-wrap">
+  const K = concursoSel && concursos().find(x => x.id === concursoSel);
+  if(!K) concursoSel = null;
+  const chip = (ativo, acao, rotulo) => `<button onclick="${acao}" class="px-3 py-1.5 rounded-full text-sm font-bold border-2 ${ativo ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'}">${rotulo}</button>`;
+  const barra = `<div class="flex items-center gap-2 flex-wrap mb-5">
+    <span class="text-sm font-bold text-gray-500">🏆 Concurso:</span>
+    ${chip(!K, 'gmVerConcurso()', '📚 Todas as leis')}
+    ${concursos().map(x => chip(K === x, `gmVerConcurso('${x.id}')`, '🏆 ' + esc(x.nome))).join('')}
+    <button onclick="gmConcurso()" class="px-3 py-1.5 rounded-full text-sm font-bold border-2 border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50">+ Novo concurso</button>
+  </div>`;
+  if(K) return barra + concursoHtml(K);
+  return barra + `<div class="flex items-center gap-3 mb-4 flex-wrap">
     <h3 class="text-xl font-bold flex-1">📚 Suas leis</h3>
     <button onclick="gmImportar()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ Nova lei (PDF)</button>
   </div>
