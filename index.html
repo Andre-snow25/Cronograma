@@ -2444,6 +2444,62 @@ function cadLimparGrupos(){
   cad().materias.forEach(x=>{ if(x.grupo) cont[x.grupo] = (cont[x.grupo]||0) + 1; });
   cad().materias.forEach(x=>{ if(x.grupo && cont[x.grupo]<2) delete x.grupo; });
 }
+// Tópico do tipo link (NotebookLM, YouTube, Drive...): abre o site numa aba nova
+function cadEhNotebookLM(url){ return /notebooklm/i.test(url||''); }
+function cadIconeTopico(t){
+  if(t.tipo==='link') return cadEhNotebookLM(t.url) ? '🎧' : '🔗';
+  return t.tipo==='html' ? '🎨' : '📄';
+}
+function cadSeloTopico(t){
+  if(t.tipo==='html') return '<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-bold">página importada · grifos e notas</span>';
+  if(t.tipo==='link'){
+    let site = 'link';
+    try{ site = cadEhNotebookLM(t.url) ? 'NotebookLM' : new URL(t.url).hostname.replace(/^www\./,''); }catch{}
+    return `<span class="ml-2 text-xs bg-emerald-100 text-emerald-700 rounded px-1.5 py-0.5 font-bold">${escHtml(site)} ↗</span>`;
+  }
+  return '';
+}
+function cadNormalizarUrl(u){
+  u = String(u||'').trim();
+  if(!u) return '';
+  if(!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try{ const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ''; }catch{ return ''; }
+}
+function cadAddLink(materiaId){
+  const m = cad().materias.find(x=>x.id===materiaId);
+  if(!m) return;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal-box fade" style="max-width:520px">
+        <h3 class="text-lg font-bold mb-1">🔗 Adicionar link</h3>
+        <p class="text-sm text-gray-500 mb-4">Ex.: o caderno do <b>NotebookLM</b> com o áudio e os PDFs da aula, um vídeo do YouTube ou uma pasta do Drive. Ao clicar no tópico, o link abre numa aba nova.</p>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Link</label>
+        <input id="lk-url" placeholder="https://notebooklm.google.com/..." class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do tópico</label>
+        <input id="lk-nome" placeholder="Ex: NotebookLM – Concordância (áudio e resumo)" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm focus:border-indigo-500 focus:outline-none">
+        <div class="flex gap-3 mt-5">
+          <button onclick="document.getElementById('modal-root').innerHTML=''" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+          <button id="lk-salvar" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Adicionar</button>
+        </div>
+      </div>
+    </div>`;
+  const urlEl = document.getElementById('lk-url'), nomeEl = document.getElementById('lk-nome');
+  urlEl.focus();
+  urlEl.addEventListener('input', ()=>{
+    if(!nomeEl.dataset.mexido && cadEhNotebookLM(urlEl.value)) nomeEl.value = `NotebookLM – ${m.nome}`;
+  });
+  nomeEl.addEventListener('input', ()=>{ nomeEl.dataset.mexido = '1'; });
+  document.getElementById('lk-salvar').onclick = () => {
+    const url = cadNormalizarUrl(urlEl.value);
+    if(!url){ ntf('❌ Cole um link válido (https://...)','er'); return; }
+    const nome = nomeEl.value.trim() || (cadEhNotebookLM(url) ? `NotebookLM – ${m.nome}` : url);
+    m.topicos.push({id:cadNovoId('ct'), nome, tipo:'link', url, criado:new Date().toISOString()});
+    document.getElementById('modal-root').innerHTML = '';
+    sv(); rend();
+    ntf('🔗 Link adicionado!');
+  };
+}
+
 // Um caderno pertence a um plano se foi ligado a ele (m.planos), se tem o nome de uma matéria do plano
 // ou se está vinculado a um caderno que pertence
 function cadDoPlano(m, cr){
@@ -2549,6 +2605,7 @@ ${e.cronogramas.length>1?`<div class="flex flex-wrap items-center gap-2 mb-4 tex
 </div>`:''}
 <div class="flex flex-wrap items-center gap-2 mb-4">
   <button onclick="cadAddTopico('${aberta.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ Novo tópico</button>
+  <button onclick="cadAddLink('${aberta.id}')" title="Link do NotebookLM, YouTube, Drive..." class="bg-white border-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50 px-4 py-2 rounded-lg text-sm font-bold">🔗 Adicionar link</button>
   <button onclick="cadImportarPagina('${aberta.id}')" title="Guardar no caderno uma página pronta (ex.: resumo/artifact do Claude) exatamente como ela é" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-4 py-2 rounded-lg text-sm font-bold">📥 Importar página do Claude</button>
   ${aberta.topicos.length?`<span class="text-gray-300">|</span>
   <span class="text-sm text-gray-500 font-bold">Exportar caderno:</span>
@@ -2578,11 +2635,11 @@ ${aberta.topicos.length===0?'<p class="text-gray-400 text-center py-10 bg-gray-5
       </span>
       <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${i+1}.</span>
       <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
-        <span class="font-semibold text-gray-800 break-words">${t.tipo==='html'?'🎨':'📄'} ${escHtml(t.nome)}</span>${t.tipo==='html'?'<span class="ml-2 text-xs bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 font-bold">página importada · grifos e notas</span>':''}
+        <span class="font-semibold text-gray-800 break-words">${cadIconeTopico(t)} ${escHtml(t.nome)}</span>${cadSeloTopico(t)}
         ${naJanela?'<span class="ml-2 text-xs text-indigo-600 font-bold">● aberto na página solta</span>':''}
       </button>
       ${t.criado?`<span class="text-xs text-gray-400 hidden sm:inline flex-shrink-0">${fmtDMY(new Date(t.criado))}</span>`:''}
-      ${t.tipo==='html'
+      ${t.tipo==='link' ? '' : t.tipo==='html'
         ? `<button onclick="cadImportarPagina('${aberta.id}','${t.id}')" title="Atualizar com uma versão nova do Claude (mantém grifos e notas)" class="text-xs text-gray-400 hover:text-indigo-700 px-1">🔄</button><button onclick="cadPdfPagina('${t.id}')" title="Salvar em PDF (com grifos e notas)" class="text-xs text-gray-400 hover:text-red-700 px-1">🖨️</button><button onclick="cadBaixarPagina('${t.id}')" title="Baixar esta página (.html)" class="text-xs text-gray-400 hover:text-blue-700 px-1">⬇</button>`
         : `<button onclick="cadExportar('${aberta.id}','word','${t.id}')" title="Exportar este tópico para Word" class="text-xs text-gray-400 hover:text-blue-700 px-1">📝</button>`}
       <button onclick="cadRenomear('${t.id}')" title="Renomear" class="text-xs text-gray-400 hover:text-gray-700 px-1">✏️</button>
@@ -2599,7 +2656,7 @@ ${cadVinculados(aberta).filter(x=>x.topicos.length).map(x=>`
   <ul class="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden" style="border-left:4px solid ${cadCorCapa(x)}">
     ${x.topicos.map((t,i)=>`<li data-top-nome="${escHtml(cadNorm(t.nome))}" class="${cadFiltroTop && !cadNorm(t.nome).includes(cadNorm(cadFiltroTop))?'hidden ':''}flex items-center gap-2 px-3 py-2 hover:bg-gray-50">
       <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${i+1}.</span>
-      <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0"><span class="font-semibold text-gray-700 break-words">${t.tipo==='html'?'🎨':'📄'} ${escHtml(t.nome)}</span></button>
+      <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0"><span class="font-semibold text-gray-700 break-words">${cadIconeTopico(t)} ${escHtml(t.nome)}</span>${cadSeloTopico(t)}</button>
     </li>`).join('')}
   </ul>
 </div>`).join('')}`;
@@ -2683,7 +2740,9 @@ async function cadInserirImagens(q, range, files){
 // Abre (ou reaproveita) a página solta. Precisa ser chamada direto do clique: o navegador só
 // deixa abrir a janela "sempre na frente" em resposta a um clique do usuário.
 async function cadAbrirTopico(id){
-  if(!cadAcharTopico(id)) return;
+  const achado = cadAcharTopico(id);
+  if(!achado) return;
+  if(achado.t.tipo==='link'){ window.open(achado.t.url, '_blank', 'noopener'); return; }
   let win = cadJanela && !cadJanela.closed ? cadJanela : null;
   if(!win){
     try{
@@ -3087,6 +3146,10 @@ async function cadExportar(materiaId, formato, topicoId){
   ntf('⏳ Preparando o caderno...');
   const partes = [];
   for(const [i,t] of topicos.entries()){
+    if(t.tipo==='link'){
+      partes.push(`<div class="${i>0?'quebra':''}"><h1 class="cad-topico">${escHtml(t.nome)}</h1><p><a href="${escHtml(t.url)}">${escHtml(t.url)}</a></p></div>`);
+      continue;
+    }
     if(t.tipo==='html'){
       partes.push(`<div class="${i>0?'quebra':''}"><h1 class="cad-topico">${escHtml(t.nome)}</h1><p><i>(Página importada — abra no cronograma ou use o botão ⬇ para baixar o .html.)</i></p></div>`);
       continue;
@@ -3567,7 +3630,12 @@ function cadRenomear(id){
   if(!alvo) return;
   const nome = (prompt('Novo nome:', alvo.nome)||'').trim();
   if(!nome) return;
-  alvo.nome = nome; sv(); rend();
+  alvo.nome = nome;
+  if(alvo.tipo==='link'){
+    const url = cadNormalizarUrl(prompt('Link:', alvo.url) || alvo.url);
+    if(url) alvo.url = url;
+  }
+  sv(); rend();
   // atualiza o cabeçalho da página solta, se for ela
   const aberto = cadQuillTopico && cadAcharTopico(cadQuillTopico);
   if(aberto && cadJanela && !cadJanela.closed && (aberto.t===alvo || aberto.m===alvo)){
@@ -4685,6 +4753,7 @@ ${e.cronogramas.length>1&&pdEscopo()==='todos'?pdResumoPorPlano():''}
   window.cadMudarPlano = cadMudarPlano;
   window.cadAlternarPlano = cadAlternarPlano;
   window.cadVincular = cadVincular;
+  window.cadAddLink = cadAddLink;
   window.cadSalvarVinculos = cadSalvarVinculos;
   window.cadExportar = cadExportar;
   window.cadImportarPagina = cadImportarPagina;
