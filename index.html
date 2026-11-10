@@ -2528,7 +2528,11 @@ function cadVincular(materiaId){
       <div class="modal-box fade" style="max-width:520px;max-height:90vh;overflow-y:auto">
         <h3 class="text-lg font-bold mb-1">🔗 Vincular cadernos da mesma matéria</h3>
         <p class="text-sm text-gray-500 mb-4">Marque os cadernos que são da mesma matéria que <b>${escHtml(m.nome)}</b>. Cada um continua com seus tópicos, mas dentro de qualquer um deles você vê e abre os tópicos de todos.</p>
-        ${outros.length?`<div class="space-y-1 mb-3">${parecidos.length?parecidos.map(linha).join(''):`<p class="text-gray-400 text-sm">Nenhum caderno com nome parecido com <b>${escHtml(m.nome)}</b>.</p>`}</div>
+        ${outros.length?`<div class="space-y-1 mb-3">${parecidos.length?parecidos.map(linha).join(''):`<p class="text-gray-500 text-sm">Não há outro caderno de <b>${escHtml(m.nome)}</b> para vincular.</p>
+          ${m.topicos.length>1?`<div class="bg-indigo-50 border-2 border-indigo-200 rounded-lg p-3 mt-2">
+            <p class="text-sm text-indigo-900 mb-2">Quer juntar os <b>tópicos deste caderno</b> (ex.: os resumos e o NotebookLM) num bloco que se move junto?</p>
+            <button onclick="cadVincularTopicos('${m.id}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-sm font-bold">🔗 Vincular tópicos deste caderno</button>
+          </div>`:''}`}</div>
         ${resto.length?`<button type="button" onclick="this.nextElementSibling.classList.toggle('hidden');this.remove()" class="text-sm text-indigo-600 hover:underline font-semibold mb-3">+ Mostrar os outros cadernos (${resto.length})</button>
         <div class="hidden space-y-1 mb-4 border-t pt-3"><p class="text-xs text-gray-400 mb-1">Use se a matéria tiver outro nome (ex.: "Gramática" para Português).</p>${resto.map(linha).join('')}</div>`:''}`:'<p class="text-gray-400 text-sm mb-4">Não há outros cadernos.</p>'}
         <div class="flex gap-3">
