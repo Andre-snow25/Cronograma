@@ -2514,17 +2514,23 @@ function cadVincular(materiaId){
   if(!m) return;
   const minhas = new Set(cadPalavras(m.nome));
   const outros = cad().materias.filter(x=>x!==m).map(x=>({x, pts: cadPalavras(x.nome).filter(w=>minhas.has(w)).length})).sort((a,b)=>(b.x.grupo&&b.x.grupo===m.grupo)-(a.x.grupo&&a.x.grupo===m.grupo) || b.pts-a.pts || a.x.nome.localeCompare(b.x.nome));
+  // só os da mesma matéria (nome parecido ou já vinculados); os outros ficam escondidos
+  const doGrupo = x => x.grupo && x.grupo===m.grupo;
+  const parecidos = outros.filter(o=>o.pts || doGrupo(o.x)), resto = outros.filter(o=>!o.pts && !doGrupo(o.x));
+  const linha = ({x,pts}) => `<label class="flex items-center gap-3 px-3 py-2 rounded-lg border-2 border-gray-100 hover:bg-gray-50 cursor-pointer">
+          <input type="checkbox" value="${x.id}" ${doGrupo(x)?'checked':''} class="cad-vinc w-4 h-4 accent-indigo-600">
+          <span class="w-3 h-3 rounded-sm flex-shrink-0" style="background:${cadCorCapa(x)}"></span>
+          <span class="flex-1 font-semibold text-gray-800">${escHtml(x.nome)} <span class="text-xs font-normal text-gray-400">· ${x.topicos.length} tópico(s)</span></span>
+          ${doGrupo(x)?'<span class="text-xs bg-indigo-100 text-indigo-700 font-bold rounded px-1.5 py-0.5">vinculado</span>':''}
+        </label>`;
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay" id="modal-overlay">
       <div class="modal-box fade" style="max-width:520px;max-height:90vh;overflow-y:auto">
         <h3 class="text-lg font-bold mb-1">🔗 Vincular cadernos da mesma matéria</h3>
         <p class="text-sm text-gray-500 mb-4">Marque os cadernos que são da mesma matéria que <b>${escHtml(m.nome)}</b>. Cada um continua com seus tópicos, mas dentro de qualquer um deles você vê e abre os tópicos de todos.</p>
-        ${outros.length?`<div class="space-y-1 mb-4">${outros.map(({x,pts})=>`<label class="flex items-center gap-3 px-3 py-2 rounded-lg border-2 border-gray-100 hover:bg-gray-50 cursor-pointer">
-          <input type="checkbox" value="${x.id}" ${x.grupo&&x.grupo===m.grupo?'checked':''} class="cad-vinc w-4 h-4 accent-indigo-600">
-          <span class="w-3 h-3 rounded-sm flex-shrink-0" style="background:${cadCorCapa(x)}"></span>
-          <span class="flex-1 font-semibold text-gray-800">${escHtml(x.nome)} <span class="text-xs font-normal text-gray-400">· ${x.topicos.length} tópico(s)</span></span>
-          ${pts?'<span class="text-xs bg-green-100 text-green-700 font-bold rounded px-1.5 py-0.5">parecido</span>':''}
-        </label>`).join('')}</div>`:'<p class="text-gray-400 text-sm mb-4">Não há outros cadernos.</p>'}
+        ${outros.length?`<div class="space-y-1 mb-3">${parecidos.length?parecidos.map(linha).join(''):`<p class="text-gray-400 text-sm">Nenhum caderno com nome parecido com <b>${escHtml(m.nome)}</b>.</p>`}</div>
+        ${resto.length?`<button type="button" onclick="this.nextElementSibling.classList.toggle('hidden');this.remove()" class="text-sm text-indigo-600 hover:underline font-semibold mb-3">+ Mostrar os outros cadernos (${resto.length})</button>
+        <div class="hidden space-y-1 mb-4 border-t pt-3"><p class="text-xs text-gray-400 mb-1">Use se a matéria tiver outro nome (ex.: "Gramática" para Português).</p>${resto.map(linha).join('')}</div>`:''}`:'<p class="text-gray-400 text-sm mb-4">Não há outros cadernos.</p>'}
         <div class="flex gap-3">
           <button onclick="document.getElementById('modal-root').innerHTML=''" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
           <button onclick="cadSalvarVinculos('${m.id}')" class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700">Salvar</button>
