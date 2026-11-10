@@ -3133,16 +3133,18 @@ function cadSalvarTopicosVinculados(materiaId, bloco, desfazer=false){
   sv(); rend();
   ntf(desfazer ? 'Tópicos desvinculados.' : `🔗 ${marcados.size} tópicos vinculados!`);
 }
-function cadLinhaTopicoHtml(m, t, n, podeSubir, podeDescer, cor){
+// bloco: tópico vinculado — as setas movem o bloco inteiro
+function cadLinhaTopicoHtml(m, t, n, podeSubir, podeDescer, bloco){
+  const mover = d => bloco ? `cadMoverBloco('${m.id}','${bloco}',${d})` : `cadMoverTopico('${m.id}','${t.id}',${d})`;
   const naJanela = cadQuillTopico===t.id && cadJanela && !cadJanela.closed;
   const oculto = cadFiltroTop && !cadNorm(t.nome).includes(cadNorm(cadFiltroTop));
   return `<li data-top-nome="${escHtml(cadNorm(t.nome))}" data-top-id="${t.id}" draggable="true"
       ondragstart="cadArrastarIni(event,'${t.id}')" ondragover="cadArrastarSobre(event)" ondragleave="this.classList.remove('cad-alvo')" ondrop="cadSoltar(event,'${m.id}','${t.id}')" ondragend="cadArrastarFim()"
-      class="${oculto?'hidden ':''}flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-gray-50'}" ${cor?`style="border-left:4px solid ${cor};padding-left:1.5rem"`:''}>
-      <span title="Arraste para mudar a ordem" class="cursor-grab text-gray-300 hover:text-gray-600 select-none flex-shrink-0">⠿</span>
+      class="${oculto?'hidden ':''}flex items-center gap-2 px-3 py-2 ${naJanela?'bg-indigo-50':'hover:bg-white/70'}">
+      <span title="${bloco?'Arraste para mover os tópicos vinculados (soltando sobre outro do grupo, troca a ordem dentro dele)':'Arraste para mudar a ordem'}" class="cursor-grab text-gray-300 hover:text-gray-600 select-none flex-shrink-0">⠿</span>
       <span class="flex flex-col flex-shrink-0 leading-none">
-        <button onclick="cadMoverTopico('${m.id}','${t.id}',-1)" title="Subir" ${podeSubir?'':'disabled'} class="text-[10px] px-1 ${podeSubir?'text-gray-400 hover:text-indigo-700':'text-gray-200'}">▲</button>
-        <button onclick="cadMoverTopico('${m.id}','${t.id}',1)" title="Descer" ${podeDescer?'':'disabled'} class="text-[10px] px-1 ${podeDescer?'text-gray-400 hover:text-indigo-700':'text-gray-200'}">▼</button>
+        <button onclick="${mover(-1)}" title="${bloco?'Subir junto com os vinculados':'Subir'}" ${podeSubir?'':'disabled'} class="text-[10px] px-1 ${podeSubir?'text-gray-400 hover:text-indigo-700':'text-gray-200'}">▲</button>
+        <button onclick="${mover(1)}" title="${bloco?'Descer junto com os vinculados':'Descer'}" ${podeDescer?'':'disabled'} class="text-[10px] px-1 ${podeDescer?'text-gray-400 hover:text-indigo-700':'text-gray-200'}">▼</button>
       </span>
       <span class="text-xs text-gray-400 w-6 text-right flex-shrink-0">${n}.</span>
       <button onclick="cadAbrirTopico('${t.id}')" class="flex-1 text-left py-1 min-w-0">
@@ -3165,19 +3167,12 @@ function cadListaTopicosHtml(m){
   return u.map((x,k)=>{
     if(!x.bloco){ n++; return cadLinhaTopicoHtml(m, x.itens[0], n, k>0, k<u.length-1); }
     const cor = CAD_CORES_BLOCO[blocos.indexOf(x.bloco) % CAD_CORES_BLOCO.length];
-    const nome = (m.blocos||{})[x.bloco] || `${x.itens.length} tópicos vinculados`;
-    const cab = `<li data-top-id="b:${x.bloco}" draggable="true"
-      ondragstart="cadArrastarIni(event,'b:${x.bloco}')" ondragover="cadArrastarSobre(event)" ondragleave="this.classList.remove('cad-alvo')" ondrop="cadSoltar(event,'${m.id}','${x.itens[0].id}')" ondragend="cadArrastarFim()"
-      class="flex items-center gap-2 px-3 py-2 font-bold" style="background:${cor}14;border-left:4px solid ${cor}">
-      <span title="Arraste para mover o bloco inteiro" class="cursor-grab text-gray-400 hover:text-gray-700 select-none flex-shrink-0">⠿</span>
-      <span class="flex flex-col flex-shrink-0 leading-none">
-        <button onclick="cadMoverBloco('${m.id}','${x.bloco}',-1)" title="Subir o bloco" ${k>0?'':'disabled'} class="text-[10px] px-1 ${k>0?'text-gray-500 hover:text-indigo-700':'text-gray-200'}">▲</button>
-        <button onclick="cadMoverBloco('${m.id}','${x.bloco}',1)" title="Descer o bloco" ${k<u.length-1?'':'disabled'} class="text-[10px] px-1 ${k<u.length-1?'text-gray-500 hover:text-indigo-700':'text-gray-200'}">▼</button>
-      </span>
-      <span class="flex-1 min-w-0 break-words" style="color:${cor}">🔗 ${escHtml(nome)} <span class="text-xs font-normal text-gray-500">· ${x.itens.length} tópicos</span></span>
-      <button onclick="cadVincularTopicos('${m.id}','${x.bloco}')" title="Editar o bloco (nome, quais tópicos, desvincular)" class="text-xs text-gray-500 hover:text-gray-800 px-1">✏️</button>
+    // sem cabeçalho: só uma moldura grossa colorida em volta dos tópicos vinculados
+    const membros = x.itens.map(t=>{ n++; return cadLinhaTopicoHtml(m, t, n, k>0, k<u.length-1, x.bloco); }).join('');
+    return `<li class="relative px-2 py-2">
+      <ul class="rounded-xl overflow-hidden divide-y" style="border:3px solid ${cor};background:${cor}12">${membros}</ul>
+      <button onclick="cadVincularTopicos('${m.id}','${x.bloco}')" title="Tópicos vinculados${(m.blocos||{})[x.bloco]?': '+escHtml(m.blocos[x.bloco]):''} — editar ou desvincular" class="absolute top-0 right-5 bg-white border-2 rounded-full w-6 h-6 text-[11px] flex items-center justify-center hover:scale-110 transition-transform" style="border-color:${cor}">🔗</button>
     </li>`;
-    return cab + x.itens.map((t,i)=>{ n++; return cadLinhaTopicoHtml(m, t, n, i>0, i<x.itens.length-1, cor); }).join('');
   }).join('');
 }
 let cadArrastando = null;
