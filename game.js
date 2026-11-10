@@ -37,7 +37,7 @@ let licao = null;       // lição em andamento
 export function iniciarGame(contexto){
   ctx = contexto;
   Object.assign(window, {
-    gmImportar, gmAtualizarLei, gmFiltro, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
+    gmImportar, gmAtualizarLei, gmFiltro, gmTrocarCenario, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
     gmAvatar, gmEscolherAvatar, gmEscolher, gmOrdenar, gmDesordenar, gmVerificar, gmContinuar, gmSair, gmFimLicao,
   });
 }
@@ -487,7 +487,51 @@ async function gmFiltro(baseId, filtroId){
   };
 }
 
-function gmAbrirLei(id){ leiAberta = id; ctx.rend(); window.scrollTo({top: 0}); }
+// Nota da fase: 3 = acertou tudo (verde), 2 = 1 ou 2 erros (amarelo), 1 = mais erros (vermelho).
+// Sem revisar, a nota cai: 15 dias depois fica amarela e 30 dias depois vermelha.
+const DIA_MS = 86400000;
+function diasSemRevisar(f){ return f.feitaEm ? Math.floor((Date.now() - new Date(f.feitaEm + 'T00:00:00')) / DIA_MS) : 0; }
+function notaAtual(f){
+  if(!f.est) return 0;
+  const d = diasSemRevisar(f);
+  return d >= 30 ? 1 : d >= 15 ? Math.min(f.est, 2) : f.est;
+}
+const COR_NOTA = {
+  3: {bg: 'bg-green-500', sombra: 'shadow-[0_6px_0_#15803d]', txt: 'text-green-700'},
+  2: {bg: 'bg-amber-400', sombra: 'shadow-[0_6px_0_#d97706]', txt: 'text-amber-700'},
+  1: {bg: 'bg-rose-500',  sombra: 'shadow-[0_6px_0_#be123c]', txt: 'text-rose-700'},
+};
+function situacaoFase(f){
+  const n = notaAtual(f), d = diasSemRevisar(f);
+  if(!n) return '';
+  if(n < f.est) return d >= 30 ? `⏰ ${d} dias sem revisar` : `⏰ revisar (${d} dias)`;
+  return n === 3 ? 'acertou tudo' : n === 2 ? '1 ou 2 erros' : 'muitos erros';
+}
+
+// Cenários do mapa de fases: muda a cada vez que a lei é aberta
+const ESTRELAS_CEU = [[20,30,2],[90,120,1],[150,60,1.5],[40,170,1],[130,190,2],[180,20,1],[70,80,1],[110,10,1.5]]
+  .map(([x, y, r]) => `radial-gradient(${r}px ${r}px at ${x}px ${y}px,#fff 50%,transparent 51%)`).join(',');
+const CENARIOS = [
+  {nome: 'Viagem espacial', escuro: true, inicio: '🌍', fim: '🪐', fimTxt: 'Chegou ao planeta!', guia: '🚀',
+   fundo: `background-color:#0b1026;background-image:${ESTRELAS_CEU},linear-gradient(#0b1026,#1e1b4b 60%,#312e81);background-size:200px 200px,200px 200px,200px 200px,200px 200px,200px 200px,200px 200px,200px 200px,200px 200px,100% 100%`,
+   enfeites: ['⭐', '🌙', '☄️', '🛰️', '✨', '👽', '🌟', '🌌']},
+  {nome: 'Até o pote de ouro', arco: true, inicio: '☁️', fim: '💰', fimTxt: 'O pote de ouro!', guia: '🦄',
+   fundo: 'background:linear-gradient(#bae6fd,#e0f2fe 35%,#ecfccb 75%,#bbf7d0)',
+   enfeites: ['☁️', '🌤️', '🦋', '🌸', '🍀', '🌼', '🐝', '🌷']},
+  {nome: 'Caça ao tesouro no mar', escuro: true, inicio: '⛵', fim: '💎', fimTxt: 'Achou o tesouro!', guia: '🤿',
+   fundo: 'background:linear-gradient(#7dd3fc,#0ea5e9 18%,#0369a1 60%,#0c4a6e)',
+   enfeites: ['🐠', '🐙', '🐢', '🫧', '🐚', '🦀', '🐡', '🪸']},
+  {nome: 'Trilha até o castelo', inicio: '🏕️', fim: '🏰', fimTxt: 'Chegou ao castelo!', guia: '🦊',
+   fundo: 'background:linear-gradient(#fef3c7,#dcfce7 40%,#bbf7d0)',
+   enfeites: ['🌲', '🌳', '🍄', '🦌', '🐿️', '🌻', '🦉', '🪨']},
+];
+let cenario = Math.floor(Math.random() * CENARIOS.length);
+function gmTrocarCenario(){ cenario = (cenario + 1) % CENARIOS.length; ctx.rend(); }
+
+function gmAbrirLei(id){
+  if(id !== leiAberta) cenario = (cenario + 1 + Math.floor(Math.random() * (CENARIOS.length - 1))) % CENARIOS.length; // outro cenário
+  leiAberta = id; ctx.rend(); window.scrollTo({top: 0});
+}
 function gmFecharLei(){ leiAberta = null; ctx.rend(); }
 async function gmExcluirLei(id){
   const L = lei(id);
@@ -513,7 +557,8 @@ function gmFase(id, i){
   ctx.modal(`
     <p class="text-xs font-bold text-indigo-600 uppercase tracking-wide">${esc(L.nome)} · Fase ${i + 1}</p>
     <h3 class="text-xl font-bold mb-1">${esc(f.rot)}</h3>
-    <div class="text-2xl mb-4">${estrelas(f.est)}</div>
+    <div class="text-2xl">${estrelas(notaAtual(f))}</div>
+    <p class="text-sm font-bold mb-4 ${notaAtual(f) ? COR_NOTA[notaAtual(f)].txt : 'text-gray-400'}">${situacaoFase(f) || 'ainda não feita'}${f.feitaEm ? ` <span class="font-normal text-gray-400">· feita em ${new Date(f.feitaEm + 'T00:00:00').toLocaleDateString('pt-BR')}</span>` : ''}</p>
     <button onclick="gmIniciarFase('${id}',${i})" class="w-full bg-green-500 hover:bg-green-600 text-white rounded-xl py-3 font-bold text-lg shadow-[0_4px_0_#15803d] mb-2">▶ ${f.est ? 'Praticar de novo' : 'Começar'}</button>
     <button onclick="gmLerFase('${id}',${i})" class="w-full border-2 border-gray-200 text-gray-700 rounded-xl py-2.5 font-bold hover:bg-gray-50 mb-2">📖 Ler os artigos antes</button>
     ${f.gerada ? `<button onclick="gmIniciarFase('${id}',${i},true)" class="w-full text-sm text-indigo-600 hover:underline font-semibold py-1">🔄 Criar exercícios novos para esta fase</button>` : ''}
@@ -670,7 +715,7 @@ function finalizar(concluiu){
     const est = licao.erros === 0 ? 3 : licao.erros <= 2 ? 2 : 1;
     licao.est = est;
     licao.xp += XP_FIM + (licao.erros === 0 ? XP_PERFEITO : 0);
-    if(L) L.fases[licao.fase].est = Math.max(L.fases[licao.fase].est || 0, est);
+    if(L){ L.fases[licao.fase].est = est; L.fases[licao.fase].feitaEm = hoje(); } // vale a última vez que fez
     const o = G.ofensiva;
     if(o.ultimo !== hoje()){
       o.dias = o.ultimo === ontem() ? o.dias + 1 : 1;
@@ -845,18 +890,48 @@ function mapaHtml(L){
     <button onclick="gmFiltro('${base.id}')" class="px-3 py-1.5 rounded-full text-sm font-bold border-2 border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50">+ Novo filtro</button>
   </div>
   <p class="text-sm text-gray-500 mb-6">${feitas} de ${L.fases.length} fases concluídas · ${L.nArt} artigos${L.fonte ? ` · <a href="${esc(L.fonte)}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">Planalto</a>${L.atualizada ? ` (conferida em ${new Date(L.atualizada).toLocaleDateString('pt-BR')})` : ''}` : ''}. Toque numa fase para começar.</p>
-  <div class="flex flex-col items-center gap-5 pb-8">
-    ${L.fases.map((f, i) => {
-      const livre = liberada(L, i), atualF = i === proxima;
-      const cor = f.est ? 'bg-amber-400 shadow-[0_6px_0_#d97706]' : livre ? 'bg-green-500 shadow-[0_6px_0_#15803d]' : 'bg-gray-300 shadow-[0_6px_0_#9ca3af]';
-      return `<div class="flex flex-col items-center" style="transform:translateX(${desloc[i % desloc.length]}px)">
-        ${atualF && livre ? `<span class="text-xs font-bold text-green-700 bg-white border-2 border-green-300 rounded-lg px-2 py-0.5 mb-1 animate-bounce">COMEÇAR</span>` : ''}
-        <button ${livre ? `onclick="gmFase('${L.id}',${i})"` : 'disabled'} title="${esc(f.rot)}" class="w-16 h-16 rounded-full ${cor} text-white text-xl font-bold flex items-center justify-center ${livre ? 'hover:brightness-110 active:translate-y-1' : 'cursor-not-allowed'}">${livre ? (f.est ? '★' : i + 1) : '🔒'}</button>
-        <p class="text-[11px] text-gray-500 mt-2 max-w-[140px] text-center leading-tight">${esc(f.rot)}</p>
-        ${f.nova ? '<span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 rounded px-1">texto atualizado</span>' : ''}
-        ${f.est ? `<div class="text-xs">${estrelas(f.est)}</div>` : ''}
-      </div>`;
-    }).join('')}
+  ${mapaFasesHtml(L, desloc, proxima)}`;
+}
+function mapaFasesHtml(L, desloc, proxima){
+  const C = CENARIOS[cenario];
+  const revisar = L.fases.filter(f => f.est && notaAtual(f) < f.est).length;
+  // enfeites espalhados pelas laterais, longe do caminho do meio
+  const nEnf = Math.max(6, Math.round(L.fases.length * 1.6));
+  const enfeites = Array.from({length: nEnf}, (_, k) => {
+    const lado = k % 2 ? 4 + (k * 37 % 20) : 76 + (k * 53 % 18);
+    return `<span class="absolute select-none pointer-events-none" style="left:${lado}%;top:${(k + 0.5) / nEnf * 100}%;font-size:${18 + (k * 7 % 16)}px;opacity:.85">${C.enfeites[k % C.enfeites.length]}</span>`;
+  }).join('');
+  const arco = C.arco ? `<div class="absolute left-1/2 -translate-x-1/2 pointer-events-none" style="top:-40px;width:420px;height:210px;border-radius:210px 210px 0 0;background:radial-gradient(circle at 50% 100%,transparent 46%,#a855f7 46% 50%,#3b82f6 50% 54%,#22c55e 54% 58%,#facc15 58% 62%,#f97316 62% 66%,#ef4444 66% 70%,transparent 70%);opacity:.75"></div>` : '';
+  const placa = 'bg-white/85 backdrop-blur rounded-lg px-2 py-0.5';
+  return `<div class="flex items-center gap-3 flex-wrap text-xs mb-3">
+    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-green-500"></span>acertou tudo</span>
+    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-amber-400"></span>1 ou 2 erros · 15 dias sem revisar</span>
+    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-rose-500"></span>mais erros · 30 dias sem revisar</span>
+    <button onclick="gmTrocarCenario()" class="ml-auto text-indigo-600 hover:underline font-bold">🎨 ${esc(C.nome)} · trocar</button>
+  </div>
+  ${revisar ? `<p class="text-sm font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">⏰ ${revisar} fase(s) pedindo revisão — refaça para voltar ao verde.</p>` : ''}
+  <div class="relative rounded-3xl overflow-hidden px-2 pt-10 pb-8" style="${C.fundo}">
+    ${arco}${enfeites}
+    <div class="relative flex flex-col items-center gap-6">
+      <div class="flex flex-col items-center"><span class="text-5xl">${C.inicio}</span><span class="text-xs font-bold text-gray-700 mt-1 ${placa}">Largada</span></div>
+      ${L.fases.map((f, i) => {
+        const livre = liberada(L, i), atualF = i === proxima, nota = notaAtual(f);
+        const cor = nota ? `${COR_NOTA[nota].bg} ${COR_NOTA[nota].sombra}` : livre ? 'bg-sky-500 shadow-[0_6px_0_#0369a1]' : 'bg-gray-300 shadow-[0_6px_0_#9ca3af]';
+        const caiu = f.est && nota < f.est;
+        return `<div class="relative flex flex-col items-center" style="transform:translateX(${desloc[i % desloc.length]}px)">
+          ${atualF && livre ? `<span class="text-xs font-bold text-sky-700 bg-white border-2 border-sky-300 rounded-lg px-2 py-0.5 mb-1 animate-bounce">COMEÇAR</span>` : ''}
+          <div class="relative">
+            ${atualF && livre ? `<span class="absolute -left-12 top-2 text-4xl animate-bounce select-none">${C.guia}</span>` : ''}
+            <button ${livre ? `onclick="gmFase('${L.id}',${i})"` : 'disabled'} title="${esc(f.rot)}${situacaoFase(f) ? ' — ' + esc(situacaoFase(f)) : ''}" class="w-16 h-16 rounded-full ${cor} text-white text-xl font-bold flex items-center justify-center ring-4 ring-white/60 ${livre ? 'hover:brightness-110 active:translate-y-1' : 'cursor-not-allowed'}">${livre ? (nota ? '★' : i + 1) : '🔒'}</button>
+            ${caiu ? '<span class="absolute -right-2 -top-2 text-lg" title="Hora de revisar">⏰</span>' : ''}
+          </div>
+          <p class="text-[11px] text-gray-700 font-semibold mt-2 max-w-[150px] text-center leading-tight ${placa}">${esc(f.rot)}</p>
+          ${f.nova ? '<span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 rounded px-1 mt-0.5">texto atualizado</span>' : ''}
+          ${nota ? `<div class="text-xs mt-0.5 ${placa}">${estrelas(nota)}</div>` : ''}
+        </div>`;
+      }).join('')}
+      <div class="flex flex-col items-center"><span class="text-6xl">${C.fim}</span><span class="text-xs font-bold text-gray-700 mt-1 ${placa}">${esc(C.fimTxt)}</span></div>
+    </div>
   </div>`;
 }
 function listaHtml(){
@@ -873,7 +948,7 @@ function listaHtml(){
   </div>` : `<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">${leis.map(L => {
     const feitas = L.fases.filter(f => f.est > 0).length;
     const pct = Math.round(feitas / L.fases.length * 100);
-    const est = L.fases.reduce((s, f) => s + (f.est || 0), 0);
+    const est = L.fases.reduce((s, f) => s + notaAtual(f), 0);
     return `<button onclick="gmAbrirLei('${L.id}')" class="text-left bg-white border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg rounded-2xl p-4 transition-all">
       <p class="font-bold text-gray-800 break-words mb-1">⚖️ ${esc(L.nome)}</p>
       <p class="text-xs text-gray-500 mb-3">${L.nArt} artigos · ${L.fases.length} fases · ⭐ ${est}/${L.fases.length * 3}</p>
