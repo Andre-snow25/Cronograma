@@ -37,7 +37,7 @@ let licao = null;       // lição em andamento
 export function iniciarGame(contexto){
   ctx = contexto;
   Object.assign(window, {
-    gmImportar, gmAtualizarLei, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
+    gmImportar, gmAtualizarLei, gmFiltro, gmAbrirLei, gmFecharLei, gmExcluirLei, gmFase, gmIniciarFase, gmLerFase,
     gmAvatar, gmEscolherAvatar, gmEscolher, gmOrdenar, gmDesordenar, gmVerificar, gmContinuar, gmSair, gmFimLicao,
   });
 }
@@ -196,15 +196,22 @@ function separarArtigos(texto){
     return {rot, texto, num: mk.num};
   }).filter(a => !(a.texto.length < 140 && /revogad|vetad/i.test(a.texto)));
 }
-// "Arts. 1º a 16: ...  Art. 37  Art. 41" → {1..16, 37, 41}. Aceita "a", "até" e hífen.
+// Lista dos artigos que caem → números. Lê só o que vem depois de "Art."/"Arts." ("Arts. 1º a 16",
+// "Art. 37", "Arts. 5º, 6º e 7º"), para não pegar "34 incisos" ou "3 anos" das descrições.
+// Se o texto não tiver nenhum "Art.", aceita números soltos ("1 a 16, 37, 144").
 function lerSelecao(texto){
   const nums = new Set();
-  const re = /(\d{1,4}(?:\.\d{3})*)\s*[º°o]?\s*(?:(?:a|até|ao|-|–)\s*(?:art\.?\s*)?(\d{1,4}(?:\.\d{3})*))?/gi;
-  let m;
-  while((m = re.exec(texto))){
-    const de = parseInt(m[1].replace(/\./g, ''), 10), ate = m[2] ? parseInt(m[2].replace(/\./g, ''), 10) : de;
-    if(ate >= de && ate - de <= 2000) for(let n = de; n <= ate; n++) nums.add(n);
-  }
+  const N = '(\\d{1,4}(?:\\.\\d{3})*)\\s*[º°o]?(?:\\s*-\\s*[A-Z]{1,2}\\b)?';
+  const somar = trecho => {
+    const re = new RegExp(N + '(?:\\s*(?:a|até|ao|-|–)\\s*(?:arts?\\.?\\s*)?' + N + ')?', 'gi');
+    let m;
+    while((m = re.exec(trecho))){
+      const de = parseInt(m[1].replace(/\./g, ''), 10), ate = m[2] ? parseInt(m[2].replace(/\./g, ''), 10) : de;
+      if(ate >= de && ate - de <= 2000) for(let n = de; n <= ate; n++) nums.add(n);
+    }
+  };
+  const refs = [...String(texto || '').matchAll(/\bArts?\.?\s*((?:\d[\d.]*\s*[º°o]?(?:\s*-\s*[A-Z]{1,2}\b)?\s*(?:,|e|a|até|ao|-|–)?\s*)+)/gi)];
+  if(refs.length) refs.forEach(r => somar(r[1])); else somar(String(texto || ''));
   return nums;
 }
 // Artigo longo demais (ex.: art. 5º da CF) vira várias partes, quebrando entre incisos/linhas
@@ -359,8 +366,18 @@ async function gmAtualizarLei(id){
     novas = montarFases(artigos, L.porFase || 5);
     L.nArt = artigos.length;
   }catch(err){ ctx.ntf('❌ ' + (err.message || err), 'er'); return; }
+  let mudou;
+  try{ mudou = await aplicarFases(L, novas); }
+  catch(err){ erroNuvem(err); return; }
+  L.atualizada = new Date().toISOString();
+  ctx.sv(); ctx.rend();
+  ctx.ntf(mudou ? `🔄 Lei atualizada: ${mudou} fase(s) mudaram e vão ganhar exercícios novos.` : '✅ A lei já estava atualizada.');
+}
+// Troca as fases da trilha pelas novas, mantendo exercícios e estrelas das que não mudaram
+async function aplicarFases(L, novas){
+  const id = L.id;
   let mudou = 0;
-  try{
+  {
     for(let i = 0; i < novas.length; i++){
       const h = hashFase(novas[i]), velha = L.fases[i];
       let igual = velha?.h === h;
@@ -375,21 +392,116 @@ async function gmAtualizarLei(id){
     }
     for(let i = novas.length; i < L.fases.length; i++) ctx.deleteDoc(ref(docFase(id, i))).catch(() => {});
     if(L.fases.length > novas.length){ mudou += L.fases.length - novas.length; L.fases.length = novas.length; }
-  }catch(err){ erroNuvem(err); return; }
-  L.atualizada = new Date().toISOString();
-  ctx.sv(); ctx.rend();
-  ctx.ntf(mudou ? `🔄 Lei atualizada: ${mudou} fase(s) mudaram e vão ganhar exercícios novos.` : '✅ A lei já estava atualizada.');
+  }
+  return mudou;
+}
+
+// ---------- filtros: trilhas só com os artigos que caem num edital ----------
+// Cada filtro é uma trilha própria (fases e estrelas separadas) ligada à lei de origem por L.base.
+function filtrosDe(L){ return g().leis.filter(x => x.base === L.id); }
+function numDoRot(rot){ const m = /Art\.\s*([\d.]+)/.exec(rot || ''); return m ? parseInt(m[1].replace(/\./g, ''), 10) : -1; }
+// Todos os artigos da lei de origem: do Planalto (lei inteira) se tiver o endereço, senão das fases guardadas
+async function artigosDaLei(base){
+  if(base.fonte){
+    try{ return separarArtigos(htmlParaTexto((await buscarPlanalto(base.fonte)).html)); }
+    catch(err){ console.warn('Planalto indisponível, usando o texto guardado:', err); }
+  }
+  const docs = [];
+  for(let i = 0; i < base.fases.length; i += 20){
+    docs.push(...await Promise.all(base.fases.slice(i, i + 20).map((f, k) => lerDoc(docFase(base.id, i + k)))));
+  }
+  const arts = [];
+  docs.forEach(d => (d?.artigos || []).forEach(a => {
+    const rot = a.rot.replace(/\s*\(parte \d+\/\d+\)$/, '');
+    const ult = arts[arts.length - 1];
+    if(ult && ult.rot === rot) ult.texto += '\n' + a.texto; // junta as partes de um artigo longo
+    else arts.push({rot, texto: a.texto, num: numDoRot(rot)});
+  }));
+  return arts;
+}
+async function gmFiltro(baseId, filtroId){
+  const base = lei(baseId), F = filtroId ? lei(filtroId) : null;
+  if(!base) return;
+  ctx.modal(`
+    <h3 class="text-lg font-bold mb-1">🎯 ${F ? 'Editar filtro' : 'Novo filtro'} — ${esc(base.nome)}</h3>
+    <p class="text-sm text-gray-500 mb-3">Uma trilha só com os artigos que caem no seu concurso, com fases e estrelas próprias. Cole a lista do edital: o app lê os números depois de "Art." / "Arts." e ignora as descrições.</p>
+    <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do filtro</label>
+    <input id="gf-nome" value="${esc(F?.filtro || '')}" placeholder="Ex: Fotógrafo PC-SP" class="w-full border-2 border-gray-300 rounded-lg p-2 text-sm mb-3 focus:border-indigo-500 focus:outline-none">
+    <label class="block text-sm font-semibold text-gray-700 mb-1">Artigos que caem</label>
+    <textarea id="gf-sel" rows="9" placeholder="Ex:&#10;Título I – Princípios Fundamentais&#10;Art. 1º: fundamentos da República...&#10;Arts. 5º a 16&#10;Art. 37: administração pública&#10;Art. 144: segurança pública" class="w-full border-2 border-gray-300 rounded-lg p-2 text-xs focus:border-indigo-500 focus:outline-none">${esc(F?.selecao || '')}</textarea>
+    <div class="flex items-center gap-2 mt-2 text-sm">
+      <label class="font-semibold text-gray-700">Artigos por fase:</label>
+      <select id="gf-por" class="border-2 border-gray-300 rounded-lg px-2 py-1">${[3, 5, 8].map(n => `<option ${(F?.porFase || 5) === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    </div>
+    <div id="gf-previa" class="text-sm text-gray-600 mt-3"><p class="text-indigo-600">📖 Carregando os artigos da lei...</p></div>
+    ${F ? '<p class="text-xs text-gray-400 mt-2">Fases que não mudarem mantêm os exercícios e as estrelas.</p>' : ''}
+    <div class="flex gap-3 mt-5">
+      <button onclick="document.getElementById('modal-root').innerHTML=''" class="flex-1 border-2 border-gray-200 text-gray-600 rounded-lg py-2.5 font-semibold hover:bg-gray-50">Cancelar</button>
+      <button id="gf-salvar" disabled class="flex-1 bg-indigo-600 text-white rounded-lg py-2.5 font-semibold hover:bg-indigo-700 disabled:opacity-50">${F ? 'Salvar' : 'Criar filtro'}</button>
+    </div>`, 620);
+  const $ = id => document.getElementById(id);
+  let todos = [];
+  try{ todos = await artigosDaLei(base); }
+  catch(err){ erroNuvem(err); return; }
+  if(!$('gf-salvar')) return; // janela fechada enquanto carregava
+  let escolhidos = [];
+  const previa = () => {
+    const sel = lerSelecao($('gf-sel').value);
+    escolhidos = todos.filter(a => sel.has(a.num));
+    const achados = new Set(todos.map(a => a.num));
+    const faltam = [...sel].filter(n => !achados.has(n));
+    const fases = montarFases(escolhidos, +$('gf-por').value);
+    $('gf-previa').innerHTML = !sel.size ? '<p class="text-gray-400">Cole a lista para ver quais artigos entram.</p>'
+      : escolhidos.length ? `<p class="font-bold text-gray-700">✅ ${escolhidos.length} artigos · ${fases.length} fases</p>
+        <p class="text-xs text-gray-500 mt-1 break-words">${esc(escolhidos.map(a => a.rot.replace(/^Art\. /, '')).join(', '))}</p>
+        ${faltam.length ? `<p class="text-xs text-amber-600 mt-1">⚠ Não estão na lei guardada: art. ${faltam.slice(0, 15).join(', ')}${faltam.length > 15 ? '…' : ''}</p>` : ''}`
+      : '<p class="text-red-600">Nenhum desses artigos está na lei.</p>';
+    $('gf-salvar').disabled = !escolhidos.length;
+  };
+  $('gf-sel').addEventListener('input', previa);
+  $('gf-por').addEventListener('change', previa);
+  previa();
+  $('gf-salvar').onclick = async () => {
+    const nome = $('gf-nome').value.trim();
+    if(!nome){ ctx.ntf('❌ Dê um nome para o filtro', 'er'); return; }
+    const porFase = +$('gf-por').value, selecao = $('gf-sel').value.trim();
+    const novas = montarFases(escolhidos, porFase);
+    $('gf-salvar').disabled = true; $('gf-salvar').textContent = 'Salvando...';
+    try{
+      if(F){
+        Object.assign(F, {filtro: nome, selecao, porFase, nArt: escolhidos.length});
+        await aplicarFases(F, novas);
+      } else {
+        const id = 'lei' + Date.now().toString(36);
+        for(let i = 0; i < novas.length; i += 20){
+          await Promise.all(novas.slice(i, i + 20).map((arts, k) => gravarDoc(docFase(id, i + k), {artigos: arts, exercicios: null})));
+        }
+        g().leis.push({id, base: base.id, nome: base.nome, filtro: nome, criada: new Date().toISOString(), nArt: escolhidos.length,
+          fonte: base.fonte || null, selecao, porFase, fases: novas.map(arts => ({rot: rotuloFase(arts), est: 0, h: hashFase(arts)}))});
+        leiAberta = id;
+      }
+    }catch(err){ $('gf-salvar').disabled = false; $('gf-salvar').textContent = 'Salvar'; erroNuvem(err); return; }
+    document.getElementById('modal-root').innerHTML = '';
+    ctx.sv(); ctx.rend();
+    ctx.ntf(F ? '🎯 Filtro atualizado!' : `🎯 Filtro "${nome}" criado: ${novas.length} fases!`);
+  };
 }
 
 function gmAbrirLei(id){ leiAberta = id; ctx.rend(); window.scrollTo({top: 0}); }
 function gmFecharLei(){ leiAberta = null; ctx.rend(); }
 async function gmExcluirLei(id){
   const L = lei(id);
-  if(!L || !confirm(`Excluir "${L.nome}" e o progresso das ${L.fases.length} fases?`)) return;
-  g().leis = g().leis.filter(x => x !== L);
-  if(leiAberta === id) leiAberta = null;
+  if(!L) return;
+  const filhos = L.base ? [] : filtrosDe(L);
+  const msg = L.base
+    ? `Excluir o filtro "${L.filtro}" e o progresso das ${L.fases.length} fases dele? A lei continua.`
+    : `Excluir "${L.nome}" e o progresso das ${L.fases.length} fases${filhos.length ? ` (e os ${filhos.length} filtro(s) dela)` : ''}?`;
+  if(!confirm(msg)) return;
+  const sair = [L, ...filhos];
+  g().leis = g().leis.filter(x => !sair.includes(x));
+  leiAberta = L.base && lei(L.base) ? L.base : null;
   ctx.sv(); ctx.rend();
-  L.fases.forEach((f, i) => ctx.deleteDoc(ref(docFase(id, i))).catch(() => {}));
+  sair.forEach(x => x.fases.forEach((f, i) => ctx.deleteDoc(ref(docFase(x.id, i))).catch(() => {})));
 }
 
 // ---------- fase: painel, leitura e início ----------
@@ -717,11 +829,20 @@ function mapaHtml(L){
   const feitas = L.fases.filter(f => f.est > 0).length;
   const desloc = [0, 48, 72, 48, 0, -48, -72, -48];
   const proxima = L.fases.findIndex(f => !f.est);
-  return `<div class="flex items-center gap-3 mb-2 flex-wrap">
+  const base = L.base ? lei(L.base) || L : L;
+  const chip = (x, rotulo) => `<button onclick="gmAbrirLei('${x.id}')" class="px-3 py-1.5 rounded-full text-sm font-bold border-2 ${x === L ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'}">${rotulo}</button>`;
+  return `<div class="flex items-center gap-3 mb-3 flex-wrap">
     <button onclick="gmFecharLei()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-lg text-sm font-bold">← Leis</button>
-    <h3 class="text-xl font-bold flex-1 break-words">⚖️ ${esc(L.nome)}</h3>
+    <h3 class="text-xl font-bold flex-1 break-words">⚖️ ${esc(base.nome)}</h3>
     ${L.fonte ? `<button onclick="gmAtualizarLei('${L.id}')" title="Buscar a versão atual no Planalto" class="bg-white border-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50 px-3 py-1.5 rounded-lg text-sm font-bold">🔄 Atualizar do Planalto</button>` : ''}
-    <button onclick="gmExcluirLei('${L.id}')" class="text-sm text-red-500 hover:text-red-700 font-bold">🗑️ Excluir</button>
+    ${L.base ? `<button onclick="gmFiltro('${base.id}','${L.id}')" class="text-sm text-gray-500 hover:text-gray-800 font-bold">✏️ Editar filtro</button>` : ''}
+    <button onclick="gmExcluirLei('${L.id}')" class="text-sm text-red-500 hover:text-red-700 font-bold">🗑️ ${L.base ? 'Excluir filtro' : 'Excluir'}</button>
+  </div>
+  <div class="flex items-center gap-2 flex-wrap mb-3">
+    <span class="text-sm font-bold text-gray-500">🎯 Filtro:</span>
+    ${chip(base, '📚 Lei inteira')}
+    ${filtrosDe(base).map(x => chip(x, '🎯 ' + esc(x.filtro))).join('')}
+    <button onclick="gmFiltro('${base.id}')" class="px-3 py-1.5 rounded-full text-sm font-bold border-2 border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50">+ Novo filtro</button>
   </div>
   <p class="text-sm text-gray-500 mb-6">${feitas} de ${L.fases.length} fases concluídas · ${L.nArt} artigos${L.fonte ? ` · <a href="${esc(L.fonte)}" target="_blank" rel="noopener" class="text-indigo-600 hover:underline">Planalto</a>${L.atualizada ? ` (conferida em ${new Date(L.atualizada).toLocaleDateString('pt-BR')})` : ''}` : ''}. Toque numa fase para começar.</p>
   <div class="flex flex-col items-center gap-5 pb-8">
@@ -739,7 +860,7 @@ function mapaHtml(L){
   </div>`;
 }
 function listaHtml(){
-  const leis = g().leis;
+  const leis = g().leis.filter(L => !L.base);
   return `<div class="flex items-center gap-3 mb-4 flex-wrap">
     <h3 class="text-xl font-bold flex-1">📚 Suas leis</h3>
     <button onclick="gmImportar()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold">+ Nova lei (PDF)</button>
@@ -756,6 +877,7 @@ function listaHtml(){
     return `<button onclick="gmAbrirLei('${L.id}')" class="text-left bg-white border-2 border-gray-200 hover:border-indigo-300 hover:shadow-lg rounded-2xl p-4 transition-all">
       <p class="font-bold text-gray-800 break-words mb-1">⚖️ ${esc(L.nome)}</p>
       <p class="text-xs text-gray-500 mb-3">${L.nArt} artigos · ${L.fases.length} fases · ⭐ ${est}/${L.fases.length * 3}</p>
+      ${filtrosDe(L).length ? `<p class="text-xs text-indigo-600 font-bold -mt-2 mb-3 break-words">🎯 ${filtrosDe(L).map(x => esc(x.filtro)).join(' · ')}</p>` : ''}
       <div class="bg-gray-100 rounded-full h-2.5 overflow-hidden"><div class="bg-green-500 h-2.5 rounded-full" style="width:${pct}%"></div></div>
       <p class="text-xs text-gray-400 mt-1">${pct}% concluído</p>
     </button>`;
